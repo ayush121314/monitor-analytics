@@ -3,3 +3,6 @@ node_modules/
 runs/
 state.json
 FINDINGS.md
+PREFERENCES.md
+db.json
+health.json

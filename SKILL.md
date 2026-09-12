@@ -162,8 +162,27 @@ Rules:
 - **Loss** is mandatory even when nothing was lost — then write `Loss: none — <what would have shown it>`. Quantify whenever the data allows: how many events, orders, rupees, users, over what window. Never "may be affected" without a number or an explicit "could not quantify, here is why".
 - **Checked** is the audit trail: every probe you ran, numbered, each with the query/command *and* the number it returned. An empty probe still belongs there — an empty probe is evidence.
 - **2.1 Naya code kuch tod to nahi raha** — run `node scripts/crashscan.mjs --from now-24h` (it greps prod for `is not a function`, `Cannot read propert`, `is not defined`, `TypeError`, `Unknown column`, missing table, MySQL `ER_` codes, `ECONNREFUSED`, `ETIMEDOUT`, HTTP timeouts, `unhandledRejection`, `uncaughtException`, OOM, `MODULE_NOT_FOUND`) and cross-match every hit's module against the files this window touched. Say it plainly: **kuch tut raha hai / tut sakta hai / kuch nahi**. Include what logs cannot show yet — a query against a column prod does not have, a call to a method that no longer exists on a rarely-hit path, a new env var nobody set.
-- **2.2 Overall backend health** — app-wide, regardless of this window: total prod errors per app over 24h, top modules by error count, and which of those are real failures versus benign business validation (`Product not found`, out-of-stock, `validation.failed` are noise — say so, so nobody chases them). Name anything failing continuously even if it predates this window, with counts.
+- **2.2 Overall backend health** — app-wide, regardless of this window. **Logs alone are not a health check.** Run all three lenses; a clean log with a broken funnel is still a broken backend.
+
+  **(a) Logs** — total prod errors per app over 24h, top modules by error count, and which are real failures versus benign business validation (`Product not found`, out-of-stock, `validation.failed`, pincode-not-serviceable are noise — say so, so nobody chases them). Compare each module's count against the previous report's numbers; a module that doubled is the finding, not the raw total.
+
+  **(b) Data (prod DB, read-only)** — run `node scripts/prodhealth.mjs` first; it returns 7-day series for orders, ORDER_FAILED, delivered, cancelled, returns and refunds, plus the stuck-work counts (refunds pending >24h, orders stuck >48h, returns awaiting QC >72h, ₹0 line items today) in one shot. Compare today against the 7-day average from that output before writing anything. These are the checks a log can never answer. Today versus the 7-day average for: orders placed, payments captured, orders delivered, returns received, refunds completed. Then the stuck-work queries: refunds pending beyond their SLA, orders sitting in one status far longer than usual, QC/inward backlog, rows with impossible values (₹0 line items, NULL where the code assumes a value). A funnel that dropped 40% today shows up here and nowhere else.
+
+  **(c) Events (Amplitude, project 760327)** — daily totals for the load-bearing events (`order_placed`, `payment_success`, `order_kept`, `delivered`, `return_received`, `rto`) against their own 7-day shape. An event that flatlines means the emitter broke even though every service looks healthy — that is exactly how the 06–07 Sep `return_received` gap was caught. Cross-check any suspicious drop against the DB count for the same day: DB high + Amplitude low = a broken emitter; both low = a real business drop.
+
+  Name anything failing continuously even if it predates this window, with counts, and say plainly which of the three lenses each finding came from.
+
 - Close with a short **Needs attention** list (🔴 first, then the 🟡s that look wrong).
+
+### Never re-investigate the same error twice
+
+An error that a previous report already explained is **not a finding again**. Before spending a single probe on an error you see in the sweep, check `PREFERENCES.md` and the last report:
+
+- **Already explained there** → do not re-analyse it, do not re-derive its cause, do not give it a section. At most one line in the health table with its current count and `known since <date>`.
+- **Raise it again only when its shape changes** — the count crosses the threshold recorded with the learning, or roughly doubles, or a new module/message starts producing it. Then it is a new finding and deserves probes.
+- **After you explain any ambient error for the first time, write the learning yourself** — append it to `PREFERENCES.md` under "Known and not worth reporting again" as *what — why — how to apply (with the re-investigation threshold)*. Do not wait to be told. The point is that the next run spends its budget on what is actually new.
+
+Example of the discipline: the Gupshup OTP 308 "re-trying too early" errors (~2,663/24h) were explained once; every later run counts them, keeps them out of the findings, and only re-opens the question if they cross 5,000/24h.
 
 **Publish in two passes — section 1 must not wait for section 2.** The moment section 1 is finished, record it and move the checkpoints; the health section is appended to the same report afterwards.
 

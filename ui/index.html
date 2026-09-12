@@ -67,10 +67,12 @@
   .pill.running { color:var(--warn); border-color:#5c4a24; }
   .pill.error { color:var(--bad); border-color:#5c2424; }
   .live { background:#1d2a1f; border:1px solid #2c4431; border-radius:9px; padding:10px 14px;
-    margin-bottom:14px; font-size:13px; display:flex; align-items:center; gap:9px; }
+    margin-bottom:14px; font-size:13px; display:flex; align-items:flex-start; gap:9px; overflow:hidden; }
   .live .dot { width:8px; height:8px; border-radius:50%; background:var(--good); animation:pulse 1.4s infinite; flex:none; }
-  .live .txt { flex:1; }
-  .bar { height:5px; background:var(--panel2); border-radius:4px; overflow:hidden; margin-top:7px; }
+  .live .txt { flex:1; min-width:0; }
+  .live .txt > div:first-child { display:flex; flex-wrap:wrap; gap:6px; align-items:baseline; }
+  .live .dot { margin-top:5px; }
+  .bar { height:5px; background:var(--panel2); border-radius:4px; overflow:hidden; margin-top:7px; width:100%; max-width:100%; }
   .bar i { display:block; height:100%; background:var(--good); transition:width .4s; }
   .live .step { font-family:var(--mono); font-size:11.5px; color:var(--muted); margin-top:6px;
     white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
