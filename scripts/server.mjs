@@ -111,6 +111,24 @@ function collect (opts = {}) {
   return JSON.parse(out)
 }
 
+function describeTool (block) {
+  const name = block.name || 'tool'
+  const input = block.input || {}
+  const clean = t => String(t || '').replace(/\s+/g, ' ').trim()
+  if (name === 'Bash') {
+    const desc = clean(input.description)
+    if (desc) return desc
+    const cmd = clean(input.command).replace(/^cd [^&]+&& /, '')
+    return cmd.slice(0, 120)
+  }
+  if (name.startsWith('mcp__Amplitude')) return 'Amplitude — ' + clean(input.rationale || input.projectId).slice(0, 110)
+  if (name === 'Read') return 'reading ' + clean(input.file_path).split('/').slice(-2).join('/')
+  if (name === 'Grep') return `searching "${clean(input.pattern).slice(0, 50)}"`
+  if (name === 'Glob') return 'listing ' + clean(input.pattern)
+  if (name === 'Write' || name === 'Edit') return 'writing ' + clean(input.file_path).split('/').slice(-1)[0]
+  return name + ' ' + clean(JSON.stringify(input)).slice(0, 90)
+}
+
 function describeChange (c) {
   const probes = []
   if (c.signals.modules.length) probes.push(`loki modules: ${c.signals.modules.join(', ')}`)
@@ -347,10 +365,7 @@ function startJob (opts = {}) {
         if (ev.type === 'assistant' && ev.message?.content) {
           for (const block of ev.message.content) {
             if (block.type === 'text' && block.text.trim()) push(block.text.trim())
-            if (block.type === 'tool_use') {
-              const input = JSON.stringify(block.input || {}).slice(0, 220)
-              push(`  · ${block.name} ${input}`)
-            }
+            if (block.type === 'tool_use') push('  · ' + describeTool(block))
           }
         } else if (ev.type === 'result') {
           job.usage = ev.usage || job.usageAcc || null
@@ -461,6 +476,12 @@ const server = createServer(async (req, res) => {
         ...(state.repos[r.name] || { last_sha: null, last_pr: null, last_run_at_ist: null })
       }))
     })
+  }
+
+  if (route === '/api/health') {
+    const p = path.join(cfg.dataDir, 'health.json')
+    if (!existsSync(p)) return send(res, 200, { ok: null, atIst: null, checks: [] })
+    try { return send(res, 200, JSON.parse(readFileSync(p, 'utf8'))) } catch { return send(res, 200, { ok: null, checks: [] }) }
   }
 
   if (route === '/api/runs') return send(res, 200, parseFindings())

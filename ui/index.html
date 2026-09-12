@@ -171,6 +171,7 @@
     <h1>Feature Audit</h1>
     <span class="stamp" id="now"></span>
     <div class="spacer"></div>
+    <span class="stamp" id="health"></span>
     <span class="stamp" id="last7"></span>
     <button id="stop" class="ghost" style="display:none">Stop</button>
     <button id="run" class="primary">Run audit</button>
@@ -459,7 +460,7 @@ function renderLive (running) {
       <div><b>Run in progress</b> — ${esc(running.phase || 'working')} <span class="pct">${pct}%</span>
       <span class="stamp">· started ${esc(running.startedAtIst || '')} · ${mins}m${running.pending != null ? ' · ' + running.pending + ' change(s)' : ''}</span></div>
       <div class="bar"><i style="width:${pct}%"></i></div>
-      <div class="step" id="liveStep">${esc(lastStep || 'working…')}</div>
+      <div class="step" id="liveStep">${esc(lastStep ? 'now: ' + lastStep : 'working…')}</div>
     </div></div>`
 }
 
@@ -621,9 +622,9 @@ function attach (id) {
     const line = JSON.parse(e.data)
     addLine(line)
     const clean = line.replace(/^\s+· /, '').trim()
-    if (clean) lastStep = clean.slice(0, 160)
+    if (clean) lastStep = clean.slice(0, 150)
     const el = document.getElementById('liveStep')
-    if (el && lastStep) el.textContent = lastStep
+    if (el && lastStep) el.textContent = 'now: ' + lastStep
   }
   stream.addEventListener('end', () => {
     stream.close(); stream = null
@@ -718,7 +719,20 @@ document.querySelectorAll('.tab').forEach(x => x.classList.toggle('on', x === t)
   document.querySelectorAll('.pane').forEach(p => p.classList.toggle('on', p.id === 'pane-' + t.dataset.pane))
 })
 
-loadSummary(); loadRuns(); loadHistory(); loadPrefs()
+async function loadHealth () {
+  const h = await (await fetch('/api/health')).json()
+  const el = $('#health')
+  if (!el) return
+  if (h.ok === null) { el.textContent = 'monitor: not run yet'; el.title = ''; return }
+  const bad = (h.checks || []).filter(c => !c.ok)
+  el.innerHTML = h.ok
+    ? `<span style="color:var(--good)">● monitor ok</span> <span class="stamp">${esc(h.atIst || '')}</span>`
+    : `<span style="color:var(--bad)">● monitor: ${bad.length} issue${bad.length > 1 ? 's' : ''}</span> <span class="stamp">${esc(h.atIst || '')}</span>`
+  el.title = (h.checks || []).map(c => `${c.ok ? 'ok  ' : 'FAIL'} ${c.name} — ${c.detail}${c.fixed ? ' → ' + c.fixed : ''}`).join('\n')
+}
+
+loadSummary(); loadRuns(); loadHistory(); loadPrefs(); loadHealth()
+setInterval(loadHealth, 30000)
 setInterval(loadHistory, 15000)
 setInterval(async () => {
   const s = await (await fetch('/api/summary')).json()

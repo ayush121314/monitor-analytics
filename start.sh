@@ -30,6 +30,11 @@ if [ -z "${PORT:-}" ]; then
   exit 1
 fi
 
+PLIST="$HOME/Library/LaunchAgents/com.primetrace.feature-audit-monitor.plist"
+if [ -f "$PLIST" ] && ! launchctl print "gui/$UID/com.primetrace.feature-audit-monitor" >/dev/null 2>&1; then
+  launchctl bootstrap "gui/$UID" "$PLIST" 2>/dev/null && echo "monitor re-armed (runs every 5 min)"
+fi
+
 echo "dashboard ready on http://localhost:$PORT"
 echo "log: $LOG"
 open "http://localhost:$PORT" 2>/dev/null || true

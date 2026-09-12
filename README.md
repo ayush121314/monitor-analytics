@@ -39,6 +39,18 @@ A verdict without a quoted number or log line is not allowed — no evidence mea
 - each report has a **discussion**: ask the AI about it, and anything you say "from now on…" is saved to `PREFERENCES.md`, which every future run reads
 - **Controls**: pick repos, override the start point, move or clear a checkpoint, fire ad-hoc Loki probes
 
+## The monitor (self-healing)
+
+`scripts/monitor.mjs` runs every five minutes from a launchd agent (`com.primetrace.feature-audit-monitor.plist`, installed once with `launchctl bootstrap gui/$UID <plist>`; `start.sh` re-arms it if it ever gets unloaded). Each pass:
+
+- dashboard not answering on any port from 8999 → **starts it**
+- a run with no output for more than eight minutes → **stops it**, so the next run is not blocked
+- `state.json` parses and every repo has a checkpoint
+- every repo is still on its own branch — an audit that leaves a checkout switched is a failure
+- prod Loki answers a probe query
+
+Results go to `health.json` and `monitor.log`, and the dashboard header shows **● monitor ok** with the per-check detail on hover.
+
 ## State
 
 | File | Purpose |
