@@ -109,8 +109,9 @@
   .feat.v-mut { border-left-color:#3a4250; }
   .cnt { font-size:11px; color:var(--muted); background:var(--panel2); border:1px solid var(--line);
     border-radius:20px; padding:1px 8px; font-weight:500; }
-  details.feat > summary .em { font-size:12px; }
-  details.feat > summary .vtext { font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:.4px; margin-left:auto; }
+  details.feat > summary .em { font-size:12px; flex:none; }
+  details.feat > summary .vtext { font-size:9.5px; font-weight:700; color:var(--muted); letter-spacing:.6px;
+    margin-left:auto; flex:none; border:1px solid var(--line); border-radius:5px; padding:2px 7px; }
   .feat .ft { display:flex; gap:10px; align-items:baseline; flex-wrap:wrap; }
   .feat .name { font-size:14.5px; font-weight:600; }
   .feat .sub { color:var(--muted); font-size:12px; font-family:var(--mono); }
@@ -127,20 +128,25 @@
   .feat details summary { cursor:pointer; color:var(--muted); font-size:12px; }
   .feat details .chk { margin-top:6px; font-size:12.5px; color:#b9c2d0; line-height:1.6; }
   details.block { border:1px solid var(--line); border-radius:11px; margin:12px 0; background:rgba(255,255,255,.012); }
-  details.block > summary { cursor:pointer; padding:11px 15px; list-style:none; display:flex; gap:10px;
+  details.block > summary { cursor:pointer; padding:9px 14px; list-style:none; display:flex; gap:10px;
     align-items:center; font-size:13.5px; font-weight:600; letter-spacing:.2px; }
   details.block > summary::-webkit-details-marker { display:none; }
   details.block > summary::before { content:'▸'; color:var(--muted); font-size:11px; transition:transform .15s; }
   details.block[open] > summary::before { transform:rotate(90deg); }
-  details.block > .inner { padding:2px 15px 14px; }
+  details.block > .inner { padding:2px 14px 12px; }
   details.sub { border:0; border-top:1px solid var(--line); border-radius:0; margin:0; background:none; }
   details.sub > summary { font-weight:600; color:var(--text); font-size:13px; letter-spacing:0; opacity:.85; }
   details.sub > summary:hover { opacity:1; }
   details.sub > .inner { padding:0 0 12px; }
-  details.feat { border:1px solid var(--line); border-left-width:3px; border-radius:10px; background:var(--panel2); margin-bottom:10px; }
-  details.feat > summary { cursor:pointer; list-style:none; padding:11px 15px; display:flex; gap:10px; align-items:baseline; flex-wrap:wrap; }
+  details.feat { border:1px solid var(--line); border-left-width:3px; border-radius:8px; background:var(--panel2); margin-bottom:7px; }
+  details.feat > summary { cursor:pointer; list-style:none; padding:8px 12px; display:flex; gap:9px;
+    align-items:baseline; flex-wrap:nowrap; }
+  details.feat > summary::before { content:'▸'; color:var(--muted); font-size:10px; flex:none; }
+  details.feat[open] > summary::before { content:'▾'; }
+  details.feat > summary .name { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  details.feat > summary .sub { white-space:nowrap; flex:none; }
   details.feat > summary::-webkit-details-marker { display:none; }
-  details.feat > .inner { padding:0 15px 13px; }
+  details.feat > .inner { padding:0 12px 12px 33px; }
   details.feat.v-bad { border-left-color:var(--bad); } details.feat.v-warn { border-left-color:var(--warn); }
   details.feat.v-good { border-left-color:var(--good); } details.feat.v-info { border-left-color:var(--accent); }
   details.feat.v-mut { border-left-color:#3a4250; }
@@ -159,11 +165,18 @@
   .bullets .bt2 { flex:1; min-width:0; }
   .bullets .bn { font-weight:600; }
   .bullets .bs { color:var(--muted); }
-  .finding { border:1px solid var(--line); border-left-width:4px; border-radius:10px;
-    background:var(--panel2); padding:12px 15px; margin:12px 0; }
-  .finding .fh { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:7px; }
-  .finding .sev { font-size:10.5px; font-weight:700; letter-spacing:.7px; padding:2px 8px; border-radius:5px; white-space:nowrap; }
-  .finding .ft { font-weight:600; font-size:14px; }
+  details.finding { border:1px solid var(--line); border-left-width:3px; border-radius:8px;
+    background:var(--panel2); margin:7px 0; }
+  details.finding > summary { cursor:pointer; list-style:none; padding:8px 12px; display:flex; gap:9px;
+    align-items:baseline; flex-wrap:nowrap; }
+  details.finding > summary::-webkit-details-marker { display:none; }
+  details.finding > summary::before { content:'▸'; color:var(--muted); font-size:10px; flex:none; }
+  details.finding[open] > summary::before { content:'▾'; }
+  details.finding > .fb { padding:0 12px 11px 33px; }
+  .finding .sev { font-size:9.5px; font-weight:700; letter-spacing:.6px; padding:2px 7px; border-radius:5px;
+    white-space:nowrap; flex:none; min-width:78px; text-align:center; }
+  .finding .ft { font-weight:600; font-size:13.5px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .finding .fx { color:var(--muted); font-size:12.5px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1; }
   .finding .fb { font-size:13px; line-height:1.65; color:#c3cbd8; }
   .finding .fb p { margin:6px 0; }
   .finding .fb ul, .finding .fb ol { margin:6px 0; padding-left:20px; }
@@ -303,6 +316,18 @@ function md (src) {
         (lens[3] ? `<p>${inline(lens[3])}</p>` : '') + '</div>')
       continue
     }
+    const pt = line.match(/^(?:\d+\.|[-*])\s*(🔴|🟠|🟡|✅|⏳|🔁|⚪|⚠️|🔧|🛠️)?\s*\*\*(.+?)\*\*\s*[—:-]?\s*(.*)$/)
+    if (pt && pt[3] && pt[3].length > 25) {
+      closeList()
+      const e = pt[1] || '🟡'
+      const map = { '🔴': ['sev-bad', 'CRITICAL'], '🟠': ['sev-imp', 'IMPORTANT'], '⚠️': ['sev-imp', 'IMPORTANT'], '🟡': ['sev-watch', 'WATCH'], '⏳': ['sev-watch', 'PENDING'], '🔁': ['', 'REVERTED'], '✅': ['sev-ok', 'DONE'], '⚪': ['', 'NOTE'], '🔧': ['', 'TODO'], '🛠️': ['', 'TODO'] }
+      const [cls, label] = map[e] || ['sev-watch', 'WATCH']
+      const tail = pt[3].replace(/\*\*/g, '').replace(/`/g, '')
+      out.push(`<details class="finding ${cls}" data-v="${cls}">
+        <summary><span class="sev">${label}</span><span class="ft">${inline(pt[2])}</span><span class="fx">— ${inline(tail.slice(0, 120))}</span></summary>
+        <div class="fb"><p>${inline(pt[3])}</p></div></details>`)
+      continue
+    }
     if (/^[-*] /.test(line)) { if (!list) { out.push('<ul>'); list = 'ul' } out.push(`<li>${inline(line.slice(2))}</li>`); continue }
     if (!line.trim()) { closeList(); continue }
     closeList(); out.push(`<p>${inline(line)}</p>`)
@@ -361,14 +386,15 @@ function blocksHtml (blocks) {
 
 function findingCard (f, id) {
   const s = sev(f.severity)
-  return `<div class="finding ${s.c}" id="${id || ''}" data-v="${s.c}">
-    <div class="fh"><span class="sev">${s.t}</span><span class="ft">${inline(f.title)}</span></div>
+  const tail = String(f.body || '').replace(/\*\*/g, '').trim()
+  return `<details class="finding ${s.c}" id="${id || ''}" data-v="${s.c}">
+    <summary><span class="sev">${s.t}</span><span class="ft">${inline(f.title)}</span>${tail ? `<span class="fx">— ${inline(tail.slice(0, 120))}</span>` : ''}</summary>
     <div class="fb">
       ${f.body ? `<p>${inline(f.body)}</p>` : ''}
       ${f.evidence?.length ? `<ul>${f.evidence.map(e => `<li>${inline(e)}</li>`).join('')}</ul>` : ''}
       ${blocksHtml(f.blocks)}
       ${f.fix ? `<p class="fix"><b>Fix:</b> ${inline(f.fix)}</p>` : ''}
-    </div></div>`
+    </div></details>`
 }
 
 function featureCard (f, id) {
@@ -602,13 +628,14 @@ function renderReport (body) {
   }
 
   const findingHtml = f => {
-    const sev = SEV[f.verdict] || SEV['🟡']
+    const sv = SEV[f.verdict] || SEV['🟡']
     const closed = /^(closed|resolved|fixed)\b/i.test(f.name)
-    const s2 = closed ? SEV['✅'] : sev
-    return `<div class="finding ${s2.cls}" id="${f.id || ''}" data-v="${verdictClass(f.verdict)}">
-      <div class="fh"><span class="sev">${s2.label}</span><span class="ft">${inline(f.name)}</span></div>
+    const s2 = closed ? SEV['✅'] : sv
+    const tail = (f.extra[0] || '').replace(/\*\*/g, '').replace(/`/g, '').trim()
+    return `<details class="finding ${s2.cls}" id="${f.id || ''}" data-v="${verdictClass(f.verdict)}">
+      <summary><span class="sev">${s2.label}</span><span class="ft">${inline(f.name)}</span>${tail ? `<span class="fx">— ${inline(tail.slice(0, 120))}</span>` : ''}</summary>
       <div class="fb">${f.extra.map(x => `<p>${inline(x)}</p>`).join('')}</div>
-    </div>`
+    </details>`
   }
 
   const featHtml = f => {
