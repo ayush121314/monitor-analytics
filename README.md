@@ -28,7 +28,8 @@ A verdict without a quoted number or log line is not allowed — no evidence mea
 ## The dashboard
 
 ```bash
-node scripts/server.mjs          # first free port from 8999
+./start.sh                       # starts it in the background and opens the browser
+# or: node scripts/server.mjs    # first free port from 8999
 ```
 
 - one button: **Run audit**

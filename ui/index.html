@@ -337,7 +337,9 @@ function renderReport (body) {
     const loss = f.rows.find(r => /^loss/i.test(r.k))
     const kya = f.rows.find(r => /^kya|^what/i.test(r.k))
     const text = (loss ? loss.v : (kya ? kya.v : f.verdict))
-    const clean = text.replace(/\*\*/g, '').replace(/`/g, '')
+    let clean = text.replace(/\*\*/g, '').replace(/`/g, '').trim()
+    const none = clean.match(/^none\b[\s—.,-]*(.*)$/i)
+    if (none) clean = none[1] ? 'no loss — ' + none[1] : 'no loss'
     const stop = clean.search(/\.\s|;\s/)
     return (stop > 25 ? clean.slice(0, stop) : clean).slice(0, 130)
   }
