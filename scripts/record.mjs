@@ -2,6 +2,7 @@ import { readFileSync, writeFileSync, appendFileSync, existsSync, mkdirSync } fr
 import path from 'node:path'
 import { execFileSync } from 'node:child_process'
 import { SKILL_DIR, loadConfig, loadState, saveState, istStamp } from './lib.mjs'
+import { toMarkdown, validate } from './render.mjs'
 
 function parseArgs (argv) {
   const out = { advance: [], dry: false }
@@ -9,6 +10,7 @@ function parseArgs (argv) {
     const a = argv[i]
     if (a === '--body') out.body = argv[++i]
     else if (a === '--advance') out.advance.push(argv[++i])
+    else if (a === '--data') out.data = argv[++i]
     else if (a === '--health') out.health = true
     else if (a === '--append') out.append = true
     else if (a === '--dry') out.dry = true
@@ -23,6 +25,30 @@ function refreshStatus () {
 const args = parseArgs(process.argv.slice(2))
 const cfg = loadConfig()
 const state = loadState(cfg)
+
+if (args.data) {
+  if (!existsSync(args.data)) {
+    console.error(`no such file: ${args.data}`)
+    process.exit(1)
+  }
+  let parsed
+  try {
+    parsed = JSON.parse(readFileSync(args.data, 'utf8'))
+  } catch (e) {
+    console.error(`report JSON does not parse: ${e.message}`)
+    process.exit(1)
+  }
+  const errors = validate(parsed)
+  if (errors.length) {
+    console.error('report JSON is not valid:\n' + errors.map(e => ' - ' + e).join('\n'))
+    process.exit(1)
+  }
+  const bodyPath = path.join(cfg.dataDir, '.report-body.md')
+  mkdirSync(cfg.dataDir, { recursive: true })
+  writeFileSync(bodyPath, toMarkdown(parsed))
+  args.body = bodyPath
+  args.reportData = parsed
+}
 
 if (!args.body || !existsSync(args.body)) {
   console.error('usage: record.mjs --body <findings.md> --advance <repo>=<sha>[:<pr>] [--advance ...] [--dry]')
@@ -101,6 +127,11 @@ for (const m of moves) {
 }
 state.runs = runNo
 saveState(cfg, state)
+if (args.reportData) {
+  const dir = path.join(cfg.dataDir, 'reports')
+  mkdirSync(dir, { recursive: true })
+  writeFileSync(path.join(dir, `run-${runNo}.json`), JSON.stringify({ run: runNo, stamp, ...args.reportData }, null, 2))
+}
 refreshStatus()
 
 console.log(JSON.stringify({ recorded: true, run: runNo, findings: findingsPath, advanced: moves.map(m => `${m.name}=${m.sha.slice(0, 8)}`) }, null, 2))

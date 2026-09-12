@@ -101,6 +101,8 @@ Keep payloads small: `--limit 200` is plenty for a sweep (the summary counts mod
 
 **Vault (flags).** For each `envFlags` entry that gates the feature, use the `crafto-vault-secrets` skill to read the **prod** value for that repo. A feature behind an OFF flag is `🟡 LIVE-NO-SIGNAL (flag off)` — correct, not broken. Never read `sensitive/` paths.
 
+**Bucket A/B (only for a bucket-gated feature).** Features here are gated by a user bucket band (`user.bucket`, 0–99, ~7,400 users each), which makes every such rollout a free experiment. `node scripts/bucketab.mjs --band 60-69 --days 7` compares the exposed band against every other bucket on per-user rates — orders per 1,000 users, buyers per 1,000, revenue per user, AOV, cancel rate, return rate — so unequal group sizes cannot mislead. Read the band out of the code (`HIGH_RISK_COD_BUCKETS`, `CHECKOUT_ADD_MORE_BUCKETS`, and the like) or out of a `feature.flag.eval` log line, then quote the comparison in that feature's **Loss** line. Respect the `caution` field: under ~100 orders a side, say the sample is too small instead of reporting a lift. Use `--buckets 4,14,24` when the gate matches an exact set rather than a range.
+
 **Static risk (run this once per run, before the per-change probes).** `node scripts/predeploy.mjs --since <checkpoint sha>` reads the diffs of everything in the window and reports, without touching prod: calls to methods the target file does not define (a `TypeError` waiting for the first request), migrations shipping with the code, and new env vars with no fallback. A `missing-method` finding is a 🔴 on its own — quote it and say which request path hits it.
 
 **Code.** Read the real diff and the current file, do not rely on the signal lists:
@@ -125,60 +127,72 @@ Ask: does the code do what the PR title claims? Is the new path reachable (gate,
 
 Every non-⚪ verdict carries at least one **quoted number or log line** with its query. No evidence → the verdict is `🟡` with "could not prove", never `✅`.
 
-## Step 5 — Write findings and advance the checkpoint
+## Step 5 — Write the report and advance the checkpoint
 
-Write the block to a scratch `.md` file. **The report always has the same shape: a summary at the top, then exactly two sections, and the second has two subsections.**
+**Write a JSON file, not markdown.** The layout is fixed in the dashboard and in `render.mjs`; you supply the content. This is why every report looks the same and why nothing has to be re-formatted by hand.
+
+```json
+{
+  "window": "05 → 12 Sept 2026 · 45 changes across 3 repos",
+  "tally": { "critical": 1, "important": 2, "watch": 8, "pending": 1, "reverted": 5, "working": 9, "none": 21 },
+  "prodHeads": [{ "repo": "ecommerce-backend", "sha": "b149d997", "at": "12 Sept 14:14 IST" }],
+  "appliedLearnings": ["Gupshup OTP 308s counted (2,721/24h), kept out of the findings"],
+  "bottomLine": "one sentence the reader can act on",
+
+  "features": [{
+    "name": "Share links resolved through a new endpoint",
+    "pr": 891,
+    "liveAt": "10 Sept 19:45 IST",
+    "severity": "critical",
+    "matlab": "plain line, no context needed — this is what shows in the summary",
+    "kyaHai": "what the change actually does",
+    "loss": "quantified, or \"none — <what would have shown it>\"",
+    "checked": ["Loki module=… level=error 24h → 44 lines, err …", "git grep … → still called at file:19"],
+    "verdict": "confirmed still live on main",
+    "blocks": []
+  }],
+
+  "health": {
+    "newCode": { "summary": "…", "table": [{ "pattern": "…", "app": "…", "lines 24h": "1", "verdict": "…" }], "findings": [], "blocks": [] },
+    "overall": { "summary": "…", "table": [], "findings": [
+      { "severity": "important", "title": "Courier webhooks accepted unverified",
+        "body": "9,658 in 24h across three couriers.",
+        "evidence": ["`|~ \"accepting webhook unverified\"` → 9,658/24h"],
+        "fix": "load the secrets, then flip the strict flag", "blocks": [] }
+    ] }
+  },
+
+  "needsAttention": [{ "severity": "critical", "title": "…", "why": "…" }],
+  "sections": [{ "title": "Bucket A/B — COD block (60-69)", "summary": "…", "blocks": [], "findings": [] }],
+  "method": ["prod DB read-only", "git untouched"]
+}
+```
+
+**`severity` is the whole vocabulary:** `critical` 🔴 · `important` 🟠 · `watch` 🟡 · `pending` ⏳ (merged, never deployed) · `reverted` 🔁 · `working` ✅ · `none` ⚪ (tests, CI, docs). The dashboard sorts the summary by it, so getting it right is what makes the report skimmable.
+
+**`blocks` is the escape hatch — use it freely.** Anywhere you see `blocks`, you can add as much structure as the evidence deserves, and it renders properly in both the markdown file and the dashboard:
+
+- `{"type":"table","title":"Daily counts","rows":[{"day":"11-Sep","events":174}]}` — any columns, taken from the first row's keys
+- `{"type":"list","items":[…]}` or `{"type":"numbered","items":[…]}`
+- `{"type":"kv","rows":[{"k":"orders / 1000 users","v":"−7.1%"}]}` — for comparisons
+- `{"type":"code","lang":"sql","text":"SELECT …"}` — a query someone should be able to re-run
+- `{"type":"quote","text":"…"}` — to pull one line out
+- `{"type":"text","text":"…"}` — plain prose
+
+And `sections` lets you add a whole block of your own — a bucket A/B, a migration audit, a one-off investigation — without bending the fixed shape. Never drop evidence because the schema "has no field for it"; put it in a block.
+
+Then record it:
 
 ```
-**Window:** 05 Sept → 12 Sept 2026 · 45 changes (40 backend, 4 cron-worker, 1 async-worker)
-**Tally:** 🔴 1 broken · 🟡 8 no-signal · ⏳ 1 never deployed · 🔁 5 reverted · ✅ 9 proven · ⚪ 21 no surface
-**Prod heads:** ecommerce-backend 12 Sept 14:14 IST · ecom-cron-worker 08 Sept 20:52 IST
-**Bottom line:** one sentence — is anything broken, is anything at risk, is the backend otherwise healthy.
-
-### 1. Features shipped
-
-#### 🔴 Broken in production
-**Share links resolved through a new endpoint** (PR #891, live 10 Sept 19:45 IST) — 🔴 BROKEN
-- **Matlab:** code me bug abhi bhi hai (main par), crash isliye nahi dikh raha kyunki us route par traffic hi nahi aa raha — traffic wapas aayega to phir tootega.
-- **Kya hai:** the controller resolves a share code to a product to attach fbAdId to the deep link.
-- **Loss:** fbAdId null on 100% of shared links since 10-Sep — attribution dead. No order/payment impact. 44 failures in 48h.
-- **Checked:** (1) Loki `module="controllers.v1.productShare" | level="error"` 48h → 44 lines, err `getSharedProduct is not a function`;
-  (2) read main's controller + service — method absent; (3) `git log -S getSharedProduct` — PR #888 deleted it, PR #891 re-added the caller.
-- **Verdict:** 🔴 confirmed, still live on main.
-
-#### ✅ Shipped and proven working
-… same four-line block per feature …
-
-### 2. Health
-
-#### 2.1 Naya code kuch tod to nahi raha
-… window-scoped crash check …
-
-#### 2.2 Overall backend health
-… app-wide error picture …
+node scripts/record.mjs --data <report>.json --advance ecommerce-backend=<sha>:<pr> --advance ecom-cron-worker=<sha> --dry
+node scripts/record.mjs --data <report>.json --advance ecommerce-backend=<sha>:<pr> --advance ecom-cron-worker=<sha>
 ```
 
-Rules:
+`record.mjs` validates the JSON (it will tell you exactly which field is missing), renders the markdown into `FINDINGS.md`, stores the JSON for the dashboard, and rewrites `STATUS.md`. A health-only run uses `--data <file>.json --health` with `"features": []`.
 
-- **Name the feature, never the commit hash.** The headline is what the change *does*, in plain words — take the PR title and make it readable ("Share links resolved through a new endpoint", not `85711d16`). PR number and live date follow in brackets. Shas belong only inside **Checked**, as part of a command someone would re-run.
-- **Section 1** groups features under `#### <emoji> <group name>` headings (Broken / Proven working / Live but unproven / Never deployed / Reverted / No runtime surface). Every feature carries the same four lines — **Kya hai**, **Loss**, **Checked**, **Verdict** — no free-form summaries.
-- **Matlab** — one plain Hinglish line the user can read without any context, right after the headline: what this means for him in practice ("code me bug abhi bhi hai, crash isliye nahi ho raha kyunki us route par traffic hi nahi aa raha"). This is the line that shows in the summary list at the top of the report, so it must stand on its own.
-- **Loss** is mandatory even when nothing was lost — then write `Loss: none — <what would have shown it>`. Quantify whenever the data allows: how many events, orders, rupees, users, over what window. Never "may be affected" without a number or an explicit "could not quantify, here is why".
-- **Checked** is the audit trail: every probe you ran, numbered, each with the query/command *and* the number it returned. An empty probe still belongs there — an empty probe is evidence.
-- **2.1 Naya code kuch tod to nahi raha** — run `node scripts/crashscan.mjs --from now-24h` (it greps prod for `is not a function`, `Cannot read propert`, `is not defined`, `TypeError`, `Unknown column`, missing table, MySQL `ER_` codes, `ECONNREFUSED`, `ETIMEDOUT`, HTTP timeouts, `unhandledRejection`, `uncaughtException`, OOM, `MODULE_NOT_FOUND`) and cross-match every hit's module against the files this window touched. Say it plainly: **kuch tut raha hai / tut sakta hai / kuch nahi**. Include what logs cannot show yet — a query against a column prod does not have, a call to a method that no longer exists on a rarely-hit path, a new env var nobody set.
-- **2.2 Overall backend health** — app-wide, regardless of this window. **Logs alone are not a health check.** Run all three lenses; a clean log with a broken funnel is still a broken backend.
+**Publish in two passes when there are features to report:** record section 1 as soon as the feature verdicts are done — that moves the checkpoints — then append the health section with `record.mjs --body <health>.md --append`. Record with `--advance` exactly once per run; a correction appends to the same report, never a second one.
 
-  **(a) Logs** — total prod errors per app over 24h, top modules by error count, and which are real failures versus benign business validation (`Product not found`, out-of-stock, `validation.failed`, pincode-not-serviceable are noise — say so, so nobody chases them). Compare each module's count against the previous report's numbers; a module that doubled is the finding, not the raw total.
-
-  **(b) Data (prod DB, read-only)** — run `node scripts/prodhealth.mjs` first; it returns 7-day series for orders, ORDER_FAILED, delivered, cancelled, returns and refunds, plus the stuck-work counts (refunds pending >24h, orders stuck >48h, returns awaiting QC >72h, ₹0 line items today) in one shot. Compare today against the 7-day average from that output before writing anything. These are the checks a log can never answer. Today versus the 7-day average for: orders placed, payments captured, orders delivered, returns received, refunds completed. Then the stuck-work queries: refunds pending beyond their SLA, orders sitting in one status far longer than usual, QC/inward backlog, rows with impossible values (₹0 line items, NULL where the code assumes a value). A funnel that dropped 40% today shows up here and nowhere else.
-
-  **(c) Events (Amplitude, project 760327)** — daily totals for the load-bearing events (`order_placed`, `payment_success`, `order_kept`, `delivered`, `return_received`, `rto`) against their own 7-day shape. An event that flatlines means the emitter broke even though every service looks healthy — that is exactly how the 06–07 Sep `return_received` gap was caught. Cross-check any suspicious drop against the DB count for the same day: DB high + Amplitude low = a broken emitter; both low = a real business drop.
-
-  Name anything failing continuously even if it predates this window, with counts, and say plainly which of the three lenses each finding came from.
-
-  **Write every still-open item as its own bold line starting with the emoji** — `**🔴 Share-link lookup still throws on main**` or `**🟠 Xpressbees returns nothing for ~3,000 waybills a day**` — even when it is carried from an earlier report and nothing changed. `status.mjs` scrapes exactly those lines into `STATUS.md`, the one file the user opens to see what is broken right now; an item buried in a table row disappears from it. Prefix a line with `CLOSED:` when it is resolved, and it drops off that list.
-
-- Close with a short **Needs attention** list (🔴 first, then the 🟡s that look wrong).
+Advance to the newest **analysed** sha per repo. Skip `--advance` for a repo you did not finish. Finally, tell the user in chat: the bottom line, the counts, and only the 🔴/🟠 items in full — point at the dashboard and `STATUS.md` for the rest.
 
 ### Never re-investigate the same error twice
 

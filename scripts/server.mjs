@@ -505,7 +505,17 @@ const server = createServer(async (req, res) => {
     try { return send(res, 200, JSON.parse(readFileSync(p, 'utf8'))) } catch { return send(res, 200, { ok: null, checks: [] }) }
   }
 
-  if (route === '/api/runs') return send(res, 200, parseFindings())
+  if (route === '/api/report' && url.searchParams.get('run')) {
+    const p = path.join(cfg.dataDir, 'reports', `run-${Number(url.searchParams.get('run'))}.json`)
+    if (!existsSync(p)) return send(res, 404, { error: 'no structured report for that run' })
+    try { return send(res, 200, JSON.parse(readFileSync(p, 'utf8'))) } catch { return send(res, 404, { error: 'unreadable' }) }
+  }
+
+  if (route === '/api/runs') {
+    const runs = parseFindings()
+    for (const r of runs) r.hasData = existsSync(path.join(cfg.dataDir, 'reports', `run-${r.run}.json`))
+    return send(res, 200, runs)
+  }
   if (route === '/api/history') return send(res, 200, history(Number(url.searchParams.get('days') || 7)))
   if (route === '/api/findings') {
     const p = path.join(cfg.dataDir, 'FINDINGS.md')
