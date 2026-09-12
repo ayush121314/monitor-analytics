@@ -179,6 +179,8 @@ Every non-⚪ verdict carries at least one **quoted number or log line** with it
 - `{"type":"quote","text":"…"}` — to pull one line out
 - `{"type":"text","text":"…"}` — plain prose
 
+**Numbers belong in blocks, never in a paragraph.** A sentence carrying ten module counts is unreadable and the dashboard can only show it as a wall. Write at most two sentences of prose per lens and put every count, series or comparison in a `table` or `kv` block. The same goes for a finding: one line in `title`, the explanation in `body`, and the numbers in `evidence` or a block.
+
 And `sections` lets you add a whole block of your own — a bucket A/B, a migration audit, a one-off investigation — without bending the fixed shape. Never drop evidence because the schema "has no field for it"; put it in a block.
 
 Then record it:
