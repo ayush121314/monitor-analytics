@@ -67,6 +67,10 @@ Per change you get: `sha`, `pr`, `branch`, `kind`, `subject`, `files`, `stat`, `
 
 `live: false` means **the prod deploy job never succeeded for that commit** (usually still waiting for approval). `liveSince` is the exact prod deploy timestamp — use it as the lower bound for every prod probe. Never probe prod for a window before `liveSince`.
 
+## Pace
+
+Keep a run proportional to what landed: roughly **2–4 probes per change**, and section 1 published within ~10 minutes of starting. Depth is for the changes that can actually hurt — money, orders, events, migrations, gates. A one-file copy change gets one probe and one line. When a probe needs more than two follow-ups to settle, stop and write `🟡 could not prove — <what would settle it>`; an honest unknown beats a long chase. Section 2's crashscan is one command — run it once, across all repos, and read the output rather than re-querying each pattern by hand.
+
 ## Step 2 — Triage each change
 
 Classify before probing, so you only run probes that can actually prove something:

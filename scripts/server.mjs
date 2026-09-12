@@ -49,9 +49,12 @@ function askClaude (prompt, sessionId) {
     const env = { ...process.env }
     delete env.ANTHROPIC_API_KEY
     delete env.ANTHROPIC_AUTH_TOKEN
-    const args = ['-p', prompt, '--output-format', 'json', '--permission-mode', 'bypassPermissions']
+    const model = process.env.FEATURE_AUDIT_CHAT_MODEL || 'claude-sonnet-5'
+    const args = ['-p', prompt, '--output-format', 'json', '--permission-mode', 'bypassPermissions', '--model', model]
+    for (const r of cfg.repos) args.push('--add-dir', r.path)
+    args.push('--add-dir', SKILL_DIR)
     if (sessionId) args.push('--resume', sessionId)
-    const child = spawn('claude', args, { cwd: cfg.repos[0].path, env, stdio: ['ignore', 'pipe', 'pipe'] })
+    const child = spawn('claude', args, { cwd: cfg.dataDir, env, stdio: ['ignore', 'pipe', 'pipe'] })
     let out = '', err = ''
     child.stdout.on('data', d => { out += d.toString() })
     child.stderr.on('data', d => { err += d.toString() })
@@ -66,7 +69,21 @@ function askClaude (prompt, sessionId) {
           tokens: (u.input_tokens || 0) + (u.output_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0),
           costUsd: parsed.total_cost_usd ?? null
         })
-      } catch {
+      } catch (e) {
+        try { writeFileSync(path.join(runsDir, 'chat-last.raw'), `# parse error: ${e.message}\n# stderr:\n${err}\n# stdout:\n${out}`) } catch {}
+        const m = out.match(/\{[\s\S]*\}/)
+        if (m) {
+          try {
+            const parsed = JSON.parse(m[0])
+            const u = parsed.usage || {}
+            return resolve({
+              text: parsed.result || '',
+              sessionId: parsed.session_id || sessionId || null,
+              tokens: (u.input_tokens || 0) + (u.output_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0),
+              costUsd: parsed.total_cost_usd ?? null
+            })
+          } catch {}
+        }
         reject(new Error((err || out || 'claude returned nothing').slice(0, 500)))
       }
     })

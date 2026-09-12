@@ -125,6 +125,13 @@
   details.feat.v-bad { border-left-color:var(--bad); } details.feat.v-warn { border-left-color:var(--warn); }
   details.feat.v-good { border-left-color:var(--good); } details.feat.v-info { border-left-color:var(--accent); }
   details.feat.v-mut { border-left-color:#3a4250; }
+  .bullets { margin:14px 0 4px; }
+  .bullets .bt { font-size:12px; color:var(--muted); text-transform:uppercase; letter-spacing:.4px; margin-bottom:7px; }
+  .bullets a { display:flex; gap:9px; align-items:baseline; padding:5px 8px; border-radius:7px;
+    text-decoration:none; color:var(--text); font-size:13px; }
+  .bullets a:hover { background:var(--panel2); }
+  .bullets .bn { font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:46%; }
+  .bullets .bs { color:var(--muted); font-size:12.5px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1; }
   .bottom { background:var(--panel2); border:1px solid var(--line); border-left:3px solid var(--accent);
     border-radius:9px; padding:11px 14px; margin:12px 0; font-size:13.5px; }
   .chat { display:flex; flex-direction:column; gap:9px; }
@@ -315,13 +322,26 @@ function renderReport (body) {
   flushFeat(); flushBuf()
 
   const counts = {}
+  const flat = []
   const walk = node => {
     for (const it of node.items) if (it.type === 'feat') {
       const c = verdictClass(it.feat.verdict); counts[c] = (counts[c] || 0) + 1
+      it.feat.id = 'f' + (flat.length + 1)
+      flat.push(it.feat)
     }
     for (const child of node.subs) walk(child)
   }
   walk(root)
+
+  const oneLiner = f => {
+    const loss = f.rows.find(r => /^loss/i.test(r.k))
+    const kya = f.rows.find(r => /^kya|^what/i.test(r.k))
+    const text = (loss ? loss.v : (kya ? kya.v : f.verdict))
+    const clean = text.replace(/\*\*/g, '').replace(/`/g, '')
+    const stop = clean.search(/\.\s|;\s/)
+    return (stop > 25 ? clean.slice(0, stop) : clean).slice(0, 130)
+  }
+  const emojiOf = v => (v.match(/🔴|🟡|✅|⏳|🔁|⚪/) || ['•'])[0]
 
   const featHtml = f => {
     const cls = verdictClass(f.verdict)
@@ -331,7 +351,7 @@ function renderReport (body) {
       if (key.startsWith('check')) details.push(`<details><summary>What was checked</summary><div class="chk">${inline(r.v)}</div></details>`)
       else kvRows.push(`<div class="k">${esc(r.k)}</div><div class="v ${key.startsWith('loss') ? 'loss' : ''}">${inline(r.v)}</div>`)
     }
-    return `<details class="feat ${cls}" data-v="${cls}" open>
+    return `<details class="feat ${cls}" data-v="${cls}" id="${f.id || ''}" open>
       <summary><span class="name">${inline(f.name)}</span>
         ${f.sub ? `<span class="sub">${esc(f.sub)}</span>` : ''}
         <span class="verdict ${cls}">${esc(f.verdict)}</span></summary>
@@ -362,6 +382,13 @@ function renderReport (body) {
     html.push('<div class="filters"><button class="on" data-f="all">All</button>' +
       VERDICTS.filter(v => counts[verdictClass(v.emoji)]).map(v =>
         `<button data-f="${verdictClass(v.emoji)}">${v.emoji} ${v.label}</button>`).join('') + '</div>')
+  }
+  if (flat.length) {
+    html.push('<div class="bullets"><div class="bt">New release · ' + flat.length + ' change' + (flat.length > 1 ? 's' : '') + '</div>' +
+      flat.map(f => `<a href="#${f.id}" onclick="jumpTo('${f.id}');return false">
+        <span>${emojiOf(f.verdict)}</span>
+        <span class="bn">${inline(f.name)}</span>
+        <span class="bs">${inline(oneLiner(f))}</span></a>`).join('') + '</div>')
   }
   html.push('</div></details>')
 
@@ -444,8 +471,14 @@ async function sendChat (key) {
   const box = document.getElementById('chat-' + key)
   input.value = ''; btn.disabled = true
   box.insertAdjacentHTML('beforeend', `<div class="msg user"><div class="who">you</div>${esc(text)}</div>`)
-  box.insertAdjacentHTML('beforeend', '<div class="msg assistant" id="pending"><div class="who">claude</div>thinking…</div>')
+  box.insertAdjacentHTML('beforeend', '<div class="msg assistant" id="pending"><div class="who">claude</div>thinking… <span id="pendingT">0s</span></div>')
+  const t0 = Date.now()
+  const timer = setInterval(() => {
+    const el = document.getElementById('pendingT')
+    if (el) el.textContent = Math.round((Date.now() - t0) / 1000) + 's'
+  }, 1000)
   const r = await (await fetch('/api/chat', { method: 'POST', body: JSON.stringify({ key, message: text, report: reportBodies[key] || '' }) })).json()
+  clearInterval(timer)
   document.getElementById('pending')?.remove()
   box.insertAdjacentHTML('beforeend', `<div class="msg assistant"><div class="who">claude</div>${esc(r.reply || r.error || 'no reply')}</div>`)
   btn.disabled = false
@@ -487,6 +520,18 @@ function addLine (text) {
   div.textContent = text
   box.appendChild(div)
   box.scrollTop = box.scrollHeight
+}
+
+window.jumpTo = id => {
+  const el = document.getElementById(id)
+  if (!el) return
+  el.open = true
+  let p = el.parentElement
+  while (p) { if (p.tagName === 'DETAILS') p.open = true; p = p.parentElement }
+  el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  el.style.transition = 'box-shadow .2s'
+  el.style.boxShadow = '0 0 0 2px var(--accent)'
+  setTimeout(() => { el.style.boxShadow = '' }, 1200)
 }
 
 let stream = null
