@@ -69,7 +69,7 @@ Per change you get: `sha`, `pr`, `branch`, `kind`, `subject`, `files`, `stat`, `
 
 ## Pace
 
-Keep a run proportional to what landed: roughly **2–4 probes per change**, and section 1 published within ~10 minutes of starting. Depth is for the changes that can actually hurt — money, orders, events, migrations, gates. A one-file copy change gets one probe and one line. When a probe needs more than two follow-ups to settle, stop and write `🟡 could not prove — <what would settle it>`; an honest unknown beats a long chase. Section 2's crashscan is one command — run it once, across all repos, and read the output rather than re-querying each pattern by hand.
+Keep a run proportional to what landed: roughly **2–4 probes per change**, and section 1 published within ~10 minutes of starting. Depth is for the changes that can actually hurt — money, orders, events, migrations, gates. A one-file copy change gets one probe and one line. When a probe needs more than two follow-ups to settle, stop and write `🟡 could not prove — <what would settle it>`; an honest unknown beats a long chase. **Answer at the coarsest resolution that settles the question** — daily counts before hourly, one query before a timeline. Pinning an exact recovery minute is almost never worth the round-trips; "back to normal on 9-Sep, was zero on 8-Sep" is the finding. Section 2's crashscan is one command — run it once, across all repos, and read the output rather than re-querying each pattern by hand.
 
 ## Step 2 — Triage each change
 

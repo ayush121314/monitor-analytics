@@ -1,4 +1,4 @@
-import { execFileSync } from 'node:child_process'
+import { execFile } from 'node:child_process'
 import path from 'node:path'
 import { loadConfig, SKILL_DIR } from './lib.mjs'
 
@@ -30,31 +30,51 @@ function parseArgs (argv) {
   return out
 }
 
+function run (args) {
+  return new Promise(resolve => {
+    execFile(process.execPath, args, { maxBuffer: 16 * 1024 * 1024, timeout: 90 * 1000 }, (err, stdout) => {
+      if (err && !stdout) return resolve(null)
+      try { resolve(JSON.parse(stdout)) } catch { resolve(null) }
+    })
+  })
+}
+
 const args = parseArgs(process.argv.slice(2))
 const cfg = loadConfig()
 const repos = args.repos.length ? cfg.repos.filter(r => args.repos.includes(r.name)) : cfg.repos
 const grafana = path.join(SKILL_DIR, 'scripts', 'grafana.mjs')
 
+const tasks = []
+for (const repo of repos) {
+  for (const p of PATTERNS) {
+    tasks.push(
+      run([grafana, '--repo', repo.name, '--grep', p.key, '--from', args.from, '--limit', String(args.limit)])
+        .then(res => ({ repo: repo.name, pattern: p.key, why: p.why, res }))
+    )
+  }
+}
+
+const settled = await Promise.all(tasks)
 const report = { from: args.from, generatedAt: new Date().toISOString(), repos: [] }
 
 for (const repo of repos) {
   const hits = []
-  for (const p of PATTERNS) {
-    let count = 0
-    try {
-      const out = execFileSync(process.execPath, [grafana, '--repo', repo.name, '--grep', p.key, '--from', args.from, '--count'], { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 })
-      count = JSON.parse(out).count || 0
-    } catch { count = -1 }
-    if (count <= 0) continue
-    let samples = []
-    try {
-      const out = execFileSync(process.execPath, [grafana, '--repo', repo.name, '--grep', p.key, '--from', args.from, '--limit', String(args.limit)], { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 })
-      const parsed = JSON.parse(out)
-      samples = (parsed.samples || []).slice(0, 3).map(s => ({ at: s.at, module: s.module, msg: s.msg, err: typeof s.err === 'string' ? s.err.slice(0, 200) : (s.err?.message || null) }))
-      hits.push({ pattern: p.key, why: p.why, count, modules: parsed.modules || {}, samples })
-    } catch {
-      hits.push({ pattern: p.key, why: p.why, count, modules: {}, samples: [] })
-    }
+  for (const row of settled.filter(x => x.repo === repo.name)) {
+    const res = row.res
+    if (!res || res.error || !res.lineCount) continue
+    hits.push({
+      pattern: row.pattern,
+      why: row.why,
+      lines: res.lineCount,
+      capped: res.lineCount >= (res.cappedAt || args.limit),
+      modules: res.modules || {},
+      samples: (res.samples || []).slice(0, 3).map(s => ({
+        at: s.at,
+        module: s.module,
+        msg: s.msg,
+        err: typeof s.err === 'string' ? s.err.slice(0, 200) : (s.err?.message || null)
+      }))
+    })
   }
   report.repos.push({ repo: repo.name, lokiApp: repo.lokiApp, hits })
 }

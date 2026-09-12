@@ -251,6 +251,7 @@ function startJob (opts = {}) {
     if (opts.since) extras.push(`start from ${opts.since} instead of the saved checkpoint`)
     if (opts.dry) extras.push('do not advance the checkpoint (dry run)')
     if (opts.note) extras.push(opts.note)
+    extras.push('keep it tight: publish section 1 within ~10 minutes of starting and finish the whole run in ~20 — if a probe has not settled after two follow-ups, write the honest 🟡 and move on rather than chasing an exact minute')
     if (extras.length) prompt += ' ' + extras.join('; ')
 
     push('')
