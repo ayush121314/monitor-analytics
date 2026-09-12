@@ -139,8 +139,12 @@ function saveMeta (job, extra = {}) {
     repos: job.repos || [],
     runNumber: job.runNumber ?? null,
     outcome: job.outcome || null,
-    usage: job.usage || null,
+    usage: job.usage || job.usageAcc || null,
     costUsd: job.costUsd ?? null,
+    tokensIn: (job.usage || job.usageAcc || {}).input_tokens || 0,
+    tokensOut: (job.usage || job.usageAcc || {}).output_tokens || 0,
+    tokensCacheRead: (job.usage || job.usageAcc || {}).cache_read_input_tokens || 0,
+    tokensCacheWrite: (job.usage || job.usageAcc || {}).cache_creation_input_tokens || 0,
     ...extra
   }
   writeFileSync(jobMetaPath(job.id), JSON.stringify(meta, null, 2))
@@ -154,33 +158,44 @@ function startJob (opts = {}) {
   jobSeq++
   const id = `${new Date().toISOString().replace(/[:.]/g, '-')}-audit-${jobSeq}`
   const job = {
-    id, kind: 'audit', status: 'running', startedAt: new Date().toISOString(), phase: 'starting', percent: 2, toolCalls: 0,
+    id, kind: 'audit', status: 'running', startedAt: new Date().toISOString(), phase: 'starting', percent: 2, toolCalls: 0, phaseBase: 2, phaseCap: 10, phaseCalls: 0,
     lines: [], subscribers: new Set(), exitCode: null, child: null,
     repos: opts.repos || [], usage: null, costUsd: null, pending: null, live: null, outcome: null, runNumber: null
   }
   jobs.set(id, job)
   writeFileSync(jobLogPath(id), `# audit ${id}\n# started ${istStamp()}\n# options ${JSON.stringify(opts)}\n\n`)
 
-  const setPhase = (phase, percent) => {
-    job.phase = phase
-    if (percent > (job.percent || 0)) job.percent = percent
+  const setPhase = (phase, base, cap) => {
+    if (job.phase !== phase) {
+      job.phase = phase
+      job.phaseBase = Math.max(base, job.percent || 0)
+      job.phaseCap = cap
+      job.phaseCalls = 0
+    }
+    const pct = Math.min(job.phaseCap, job.phaseBase + (job.phaseCalls || 0) * 1.5)
+    if (pct > (job.percent || 0)) job.percent = Math.round(pct)
   }
 
   const trackProgress = line => {
-    if (/record\.mjs[^\n]*--append/.test(line)) return setPhase('publishing the health section', 95)
-    if (/record\.mjs[^\n]*--health/.test(line)) return setPhase('publishing the health report', 92)
-    if (/record\.mjs/.test(line)) return setPhase(job.healthOnly ? 'publishing the health report' : 'publishing the features section', job.healthOnly ? 92 : 62)
-    if (/crashscan\.mjs/.test(line)) return setPhase('crash scan across all apps', 72)
-    if (/--level error/.test(line)) return setPhase('prod error sweep', 80)
-    if (/mcp__Amplitude/.test(line)) return setPhase('checking Amplitude events', Math.min(55, 20 + (job.toolCalls || 0)))
-    if (/grafana\.mjs/.test(line)) return setPhase('reading prod logs', Math.min(55, 20 + (job.toolCalls || 0)))
-    if (/prodq|mysql|information_schema/.test(line)) return setPhase('checking prod database', Math.min(55, 20 + (job.toolCalls || 0)))
-    if (/git (show|diff|log)/.test(line)) return setPhase('reading the code changes', Math.min(55, 20 + (job.toolCalls || 0)))
-    if (/^ +· /.test(line)) { job.toolCalls = (job.toolCalls || 0) + 1; return setPhase(job.phase || 'analysing', Math.min(55, 20 + job.toolCalls)) }
-    if (/new since checkpoint/.test(line)) return setPhase('found the new changes', 12)
-    if (/handing over to the AI/.test(line)) return setPhase('analysing each change', 18)
-    if (/No new commits/.test(line)) return setPhase('no new commits — health check only', 40)
-    if (/checking what has landed/.test(line)) return setPhase('collecting changes', 5)
+    if (/^ +· /.test(line)) {
+      job.toolCalls = (job.toolCalls || 0) + 1
+      job.phaseCalls = (job.phaseCalls || 0) + 1
+    }
+    const recording = /record\.mjs[^\n]*--body/.test(line)
+    if (recording && /--append/.test(line)) return setPhase('publishing the health section', 92, 98)
+    if (recording && /--health/.test(line)) return setPhase('publishing the health report', 92, 98)
+    if (recording) return setPhase(job.healthOnly ? 'publishing the health report' : 'publishing the features section', job.healthOnly ? 92 : 60, job.healthOnly ? 98 : 66)
+    if (/crashscan\.mjs/.test(line)) return setPhase('crash scan across all apps', 66, 74)
+    if (/--level error/.test(line)) return setPhase('prod error sweep', 74, 90)
+    if (/mcp__Amplitude/.test(line)) return setPhase('checking Amplitude events', 20, 58)
+    if (/grafana\.mjs/.test(line)) return setPhase(job.percent >= 66 ? 'reading prod logs (health)' : 'reading prod logs', job.percent >= 66 ? 74 : 20, job.percent >= 66 ? 90 : 58)
+    if (/prodq|mysql|information_schema/.test(line)) return setPhase('checking prod database', 20, 58)
+    if (/git (show|diff|log)/.test(line)) return setPhase('reading the code changes', 20, 58)
+    if (/new since checkpoint/.test(line)) return setPhase('found the new changes', 10, 14)
+    if (/handing over to the AI/.test(line)) return setPhase('analysing each change', 15, 58)
+    if (/No new commits/.test(line)) return setPhase('no new commits — health check only', 40, 60)
+    if (/checking what has landed/.test(line)) return setPhase('collecting changes', 3, 10)
+    if (/^ +· /.test(line)) return setPhase(job.phase || 'analysing', job.phaseBase || 20, job.phaseCap || 58)
   }
 
   const push = text => {
@@ -203,8 +218,8 @@ function startJob (opts = {}) {
     job.endedAt = new Date().toISOString()
     const state = loadState(cfg)
     const appended = (state.runs || 0) > (job.runsBefore || 0)
+    if (appended) job.runNumber = state.runs
     if (job.outcome === 'analysed') {
-      job.runNumber = appended ? state.runs : null
       job.outcome = job.healthOnly ? 'health-only' : 'analysed'
       if (appended && !job.healthOnly && job.evidence) {
         const moved = []
@@ -250,6 +265,18 @@ function startJob (opts = {}) {
       job.outcome = 'error'
       return finish(1)
     }
+
+    const scanState = loadState(cfg)
+    for (const repo of evidence.repos) {
+      if (!repo.ok) continue
+      const entry = scanState.repos[repo.name] || {}
+      entry.last_checked_at = new Date().toISOString()
+      entry.last_checked_at_ist = istStamp()
+      entry.prod_head = repo.prodHead ? repo.prodHead.short : null
+      entry.prod_head_at_ist = repo.prodHead ? repo.prodHead.atIst : null
+      scanState.repos[repo.name] = entry
+    }
+    saveState(cfg, scanState)
 
     let pending = 0
     let live = 0
@@ -308,6 +335,15 @@ function startJob (opts = {}) {
         if (!line.trim()) continue
         let ev
         try { ev = JSON.parse(line) } catch { push(line); continue }
+        if (ev.type === 'assistant' && ev.message?.usage) {
+          const u = ev.message.usage
+          job.usageAcc = job.usageAcc || { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 }
+          job.usageAcc.input_tokens += u.input_tokens || 0
+          job.usageAcc.output_tokens += u.output_tokens || 0
+          job.usageAcc.cache_read_input_tokens += u.cache_read_input_tokens || 0
+          job.usageAcc.cache_creation_input_tokens += u.cache_creation_input_tokens || 0
+          job.usage = job.usageAcc
+        }
         if (ev.type === 'assistant' && ev.message?.content) {
           for (const block of ev.message.content) {
             if (block.type === 'text' && block.text.trim()) push(block.text.trim())
@@ -317,7 +353,7 @@ function startJob (opts = {}) {
             }
           }
         } else if (ev.type === 'result') {
-          job.usage = ev.usage || null
+          job.usage = ev.usage || job.usageAcc || null
           job.costUsd = ev.total_cost_usd ?? null
           job.outcome = ev.is_error ? 'error' : 'analysed'
           if (ev.result) push(String(ev.result).trim())
@@ -366,11 +402,22 @@ function history (days = 7) {
     if (live) meta.status = live.status
     const u = meta.usage || {}
     meta.totalTokens = (u.input_tokens || 0) + (u.output_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0)
+    if (meta.tokensIn == null) meta.tokensIn = u.input_tokens || 0
+    if (meta.tokensOut == null) meta.tokensOut = u.output_tokens || 0
+    if (meta.tokensCacheRead == null) meta.tokensCacheRead = u.cache_read_input_tokens || 0
+    if (meta.tokensCacheWrite == null) meta.tokensCacheWrite = u.cache_creation_input_tokens || 0
     rows.push(meta)
   }
   for (const job of jobs.values()) {
     if (job.status === 'running' && !rows.find(r => r.id === job.id)) {
-      rows.push({ id: job.id, kind: job.kind, status: 'running', startedAt: job.startedAt, startedAtIst: toIst(job.startedAt), totalTokens: 0, outcome: null, pending: job.pending, phase: job.phase, percent: job.percent })
+      const u = job.usage || job.usageAcc || {}
+      rows.push({
+        id: job.id, kind: job.kind, status: 'running', startedAt: job.startedAt, startedAtIst: toIst(job.startedAt),
+        totalTokens: (u.input_tokens || 0) + (u.output_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0),
+        tokensIn: u.input_tokens || 0, tokensOut: u.output_tokens || 0,
+        tokensCacheRead: u.cache_read_input_tokens || 0, tokensCacheWrite: u.cache_creation_input_tokens || 0,
+        outcome: null, pending: job.pending, phase: job.phase, percent: job.percent
+      })
     }
   }
   return rows.sort((a, b) => a.startedAt < b.startedAt ? 1 : -1)
@@ -408,6 +455,9 @@ const server = createServer(async (req, res) => {
       })(),
       repos: cfg.repos.map(r => ({
         name: r.name, path: r.path, branch: r.branch, lokiApp: r.lokiApp, workflow: r.workflow, prodJob: r.prodJob,
+        last_checked_at_ist: (state.repos[r.name] || {}).last_checked_at_ist || null,
+        prod_head: (state.repos[r.name] || {}).prod_head || null,
+        prod_head_at_ist: (state.repos[r.name] || {}).prod_head_at_ist || null,
         ...(state.repos[r.name] || { last_sha: null, last_pr: null, last_run_at_ist: null })
       }))
     })

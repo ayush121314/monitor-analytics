@@ -72,6 +72,8 @@
   .live .txt { flex:1; }
   .bar { height:5px; background:var(--panel2); border-radius:4px; overflow:hidden; margin-top:7px; }
   .bar i { display:block; height:100%; background:var(--good); transition:width .4s; }
+  .live .step { font-family:var(--mono); font-size:11.5px; color:var(--muted); margin-top:6px;
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .pct { font-family:var(--mono); font-size:12px; color:var(--good); }
   @keyframes pulse { 0%,100% { opacity:1 } 50% { opacity:.25 } }
   .pill.analysed { color:var(--good); border-color:#245c45; }
@@ -187,7 +189,7 @@
 
   <div class="pane" id="pane-hist">
     <table class="hist"><thead><tr>
-      <th>Started</th><th>Outcome</th><th>Changes</th><th>Report</th><th>Tokens</th><th>Cost</th><th>Took</th><th></th>
+      <th>Started</th><th>Outcome</th><th>Changes / progress</th><th>Report</th><th>Tokens written</th><th>Cost</th><th>Took</th><th></th>
     </tr></thead><tbody id="histBody"></tbody></table>
     <div id="histEmpty" class="empty" style="display:none">No runs in the last 7 days.</div>
   </div>
@@ -445,6 +447,8 @@ function renderReport (body) {
 }
 
 let repos = []
+let lastStep = ''
+let lastReportCount = 0
 function renderLive (running) {
   const box = document.getElementById('liveBox')
   if (!box) return
@@ -455,6 +459,7 @@ function renderLive (running) {
       <div><b>Run in progress</b> — ${esc(running.phase || 'working')} <span class="pct">${pct}%</span>
       <span class="stamp">· started ${esc(running.startedAtIst || '')} · ${mins}m${running.pending != null ? ' · ' + running.pending + ' change(s)' : ''}</span></div>
       <div class="bar"><i style="width:${pct}%"></i></div>
+      <div class="step" id="liveStep">${esc(lastStep || 'working…')}</div>
     </div></div>`
 }
 
@@ -462,17 +467,19 @@ async function loadSummary () {
   const s = await (await fetch('/api/summary')).json()
   renderLive(s.running)
   $('#now').textContent = s.now + ' · ' + s.runs + ' report(s) · ' + s.dataDir
-  $('#last7').textContent = `last 7 days: ${s.last7.count} run(s) · ${fmt(s.last7.tokens)} tokens · $${s.last7.cost.toFixed(3)}`
+  $('#last7').textContent = `last 7 days: ${s.last7.count} run(s) · $${s.last7.cost.toFixed(2)}`
   repos = s.repos
   $('#chips').innerHTML = s.repos.map(r => `
     <div class="chip"><b>${esc(r.name)}</b><br>
-      <span>checked through ${r.last_sha ? esc(r.last_sha.slice(0,8)) : 'never'}${r.last_pr ? ' · PR #' + r.last_pr : ''}</span><br>
-      <span>${r.last_run_at_ist ? 'last run ' + esc(r.last_run_at_ist) : 'no run yet'}</span>
+      <span>analysed through ${r.last_sha ? esc(r.last_sha.slice(0,8)) : 'never'}${r.last_pr ? ' · PR #' + r.last_pr : ''}</span><br>
+      <span>${r.prod_head ? 'prod head ' + esc(r.prod_head) + (r.prod_head_at_ist ? ' · ' + esc(r.prod_head_at_ist) : '') : ''}</span><br>
+      <span>${r.last_checked_at_ist ? 'last checked ' + esc(r.last_checked_at_ist) : (r.last_run_at_ist ? 'last report ' + esc(r.last_run_at_ist) : 'no run yet')}</span>
     </div>`).join('')
   const opts = s.repos.map(r => `<option value="${esc(r.name)}">${esc(r.name)}</option>`).join('')
   $('#optRepos').innerHTML = opts; $('#cpRepo').innerHTML = opts; $('#pbRepo').innerHTML = opts
   loadCommits()
-  if (s.running) attach(s.running.id)
+  lastReportCount = s.runs
+  if (s.running) { $('#console').classList.add('on'); attach(s.running.id) }
 }
 
 async function loadRuns () {
@@ -566,7 +573,7 @@ async function loadHistory () {
       <td><span class="pill ${outcome}">${outcome.replace(/-/g, ' ')}</span></td>
       <td class="num">${r.status === 'running' ? esc((r.phase || 'working') + ' · ' + (r.percent || 0) + '%') : (r.pending == null ? '—' : r.pending + (r.live != null ? ` (${r.live} live)` : ''))}</td>
       <td class="num">${r.runNumber ? 'Report ' + r.runNumber : '—'}</td>
-      <td class="num">${r.totalTokens ? fmt(r.totalTokens) : '—'}</td>
+      <td class="num" title="in ${fmt(r.tokensIn)} · out ${fmt(r.tokensOut)} · cache read ${fmt(r.tokensCacheRead)} · cache write ${fmt(r.tokensCacheWrite)} · total ${fmt(r.totalTokens)}">${r.tokensOut ? fmt(r.tokensOut) + ' <span class="stamp">out</span>' : (r.totalTokens ? fmt(r.totalTokens) : '—')}</td>
       <td class="num">${r.costUsd != null ? '$' + r.costUsd.toFixed(4) : '—'}</td>
       <td class="num">${took}</td>
       <td><button class="ghost" onclick="showLog('${esc(r.id)}')">log</button></td>
@@ -610,7 +617,14 @@ function attach (id) {
   $('#run').disabled = true; $('#stop').style.display = ''
   if (stream) stream.close()
   stream = new EventSource('/api/stream?id=' + encodeURIComponent(id))
-  stream.onmessage = e => addLine(JSON.parse(e.data))
+  stream.onmessage = e => {
+    const line = JSON.parse(e.data)
+    addLine(line)
+    const clean = line.replace(/^\s+· /, '').trim()
+    if (clean) lastStep = clean.slice(0, 160)
+    const el = document.getElementById('liveStep')
+    if (el && lastStep) el.textContent = lastStep
+  }
   stream.addEventListener('end', () => {
     stream.close(); stream = null
     $('#run').disabled = false; $('#stop').style.display = 'none'
@@ -709,6 +723,8 @@ setInterval(loadHistory, 15000)
 setInterval(async () => {
   const s = await (await fetch('/api/summary')).json()
   renderLive(s.running)
+  if (s.running && s.runs !== lastReportCount) { lastReportCount = s.runs; loadRuns() }
+  if (!s.running && lastReportCount && s.runs !== lastReportCount) { lastReportCount = s.runs; loadRuns(); loadHistory() }
 }, 5000)
 </script>
 </body>
