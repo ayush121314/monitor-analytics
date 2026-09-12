@@ -101,6 +101,8 @@ Keep payloads small: `--limit 200` is plenty for a sweep (the summary counts mod
 
 **Vault (flags).** For each `envFlags` entry that gates the feature, use the `crafto-vault-secrets` skill to read the **prod** value for that repo. A feature behind an OFF flag is `🟡 LIVE-NO-SIGNAL (flag off)` — correct, not broken. Never read `sensitive/` paths.
 
+**Static risk (run this once per run, before the per-change probes).** `node scripts/predeploy.mjs --since <checkpoint sha>` reads the diffs of everything in the window and reports, without touching prod: calls to methods the target file does not define (a `TypeError` waiting for the first request), migrations shipping with the code, and new env vars with no fallback. A `missing-method` finding is a 🔴 on its own — quote it and say which request path hits it.
+
 **Code.** Read the real diff and the current file, do not rely on the signal lists:
 ```
 git -C <repo path> show --stat <sha>
@@ -200,22 +202,22 @@ Advance to the newest **analyzed** sha per repo (usually `head.sha` from the col
 
 Finally, tell the user in chat: the bottom line, the counts, and only the 🔴/🟡-worth-reading items in full. Point at `FINDINGS.md` and the dashboard for the rest.
 
-## The automated flow (nobody has to remember anything)
+## What runs by itself, and what waits for you
 
-One launchd agent runs `scripts/monitor.mjs` every five minutes. Each pass:
+**A report is never produced on its own.** The audit runs only when the user hits **Run audit** (or types `/feature-audit`) — nothing schedules it, nothing triggers it on a deploy. Their money, their call.
+
+What *does* run by itself is free — no model calls, just git and prod queries. One launchd agent runs `scripts/monitor.mjs` every five minutes:
 
 1. **Heals** — dashboard down → started; a run idle past 8 minutes → stopped; repos checked for a switched branch; prod Loki probed.
-2. **Watches prod** (`scripts/watch.mjs`) — pulls the last 15 minutes of errors per app and raises an alert for
-   - **a never-seen error signature** (the strongest "something just broke" signal),
+2. **Watches prod** (`scripts/watch.mjs`) — the last 15 minutes of errors per app, raising an alert for
+   - **a never-seen error signature** — the strongest "something just broke" signal,
    - **a spike** — a module 3× over its own rolling median,
-   - **a pre-deploy risk** — `scripts/predeploy.mjs` runs over merged-but-undeployed commits and flags a call to a method the target file does not define, a migration that ships with the code, or a new env var with no fallback.
-   Every alert names the PR that last touched that module, fires a macOS notification, and shows in the dashboard as a red banner. Same alert is not repeated for 6 hours.
-3. **Reacts to a deploy** — a fresh successful `Deploy to prod` starts an audit on its own, so the report exists before anyone asks.
-4. **Daily floor** — if nothing has run by 10:00 IST, it starts one anyway.
+   - **a pre-deploy risk** — `scripts/predeploy.mjs` over merged-but-undeployed commits: a call to a method the target file does not define, a migration riding with the code, a new env var with no fallback.
+3. **Notices a deploy** — a fresh successful `Deploy to prod` is logged and shown, so the user knows a report is worth asking for. It does not start one.
 
-When a run finishes, a macOS notification carries the tally and the bottom line.
+Every alert names the PR that last touched that module, fires a macOS notification and shows as a red banner on the dashboard; the same alert is not repeated for 6 hours. When a run the user started finishes, a notification carries its tally and bottom line.
 
-`predeploy.mjs` is worth knowing by hand too: `node scripts/predeploy.mjs --sha <sha>` on a commit before it deploys. Run against the share-link commit it reports, from the diff alone, that `productShare.js` calls `PlayStoreRedirectService.getSharedProduct()` which the service does not define — the bug that otherwise took two days and 44 prod errors to surface.
+So the loop is: the watcher tells them something moved, they hit Run, and everything after that click is automatic.
 
 ## UI
 

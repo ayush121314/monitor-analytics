@@ -115,45 +115,11 @@ if (watchOut) {
     const who = a.blame?.prs?.length ? ` (last touched by PR #${a.blame.prs.join(', #')})` : ''
     log(`ALERT ${a.kind} — ${a.app} ${a.module || ''}: ${a.detail}${who}`)
   }
-  if ((watchOut.deploysDetected || []).length && server) {
-    const busy = (await get(`http://localhost:${server.port}/api/summary`))?.running
-    for (const d of watchOut.deploysDetected) log(`deploy detected: ${d.repo} ${d.sha} live at ${d.atIst}`)
-    if (!busy) {
-      log('new prod deploy — starting an audit automatically')
-      await fetch(`http://localhost:${server.port}/api/start`, {
-        method: 'POST', body: JSON.stringify({ note: 'triggered automatically by a fresh prod deploy' })
-      }).catch(() => {})
-    } else {
-      log('new prod deploy, but a run is already in progress — not starting another')
-    }
+  for (const d of watchOut.deploysDetected || []) {
+    log(`deploy detected: ${d.repo} ${d.sha} live at ${d.atIst} — waiting for you to hit Run`)
   }
 } else {
   record('watch', false, 'error watcher did not return JSON')
-}
-
-const DAILY_HOUR = Number(process.env.FA_DAILY_HOUR || 10)
-function ranToday () {
-  const dir = path.join(cfg.dataDir, 'runs')
-  if (!existsSync(dir)) return false
-  const today = istStamp().slice(0, 11)
-  return readdirSync(dir).filter(f => f.endsWith('.meta.json')).some(f => {
-    try {
-      const m = JSON.parse(readFileSync(path.join(dir, f), 'utf8'))
-      return (m.startedAtIst || '').startsWith(today) && ['analysed', 'health-only'].includes(m.outcome)
-    } catch { return false }
-  })
-}
-
-if (server) {
-  const hourIst = Number(new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Kolkata', hour: '2-digit', hour12: false }).format(new Date()))
-  const busy = (await get(`http://localhost:${server.port}/api/summary`))?.running
-  if (hourIst >= DAILY_HOUR && !busy && !ranToday()) {
-    log(`daily audit — nothing has run today and it is past ${DAILY_HOUR}:00 IST, starting one`)
-    record('daily', true, 'started the daily audit')
-    await fetch(`http://localhost:${server.port}/api/start`, {
-      method: 'POST', body: JSON.stringify({ note: 'daily scheduled run' })
-    }).catch(() => {})
-  }
 }
 
 const health = {
