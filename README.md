@@ -42,38 +42,11 @@ A verdict without a quoted number or log line is not allowed — no evidence mea
 - each report has a **discussion**: ask the AI about it, and anything you say "from now on…" is saved to `PREFERENCES.md`, which every future run reads
 - **Controls**: pick repos, override the start point, move or clear a checkpoint, fire ad-hoc Loki probes
 
-## Knowing before you ask
-
-The audit is the deep pass; these three layers are what tell you a feature broke without you running anything.
-
-| Layer | Catches | When |
-|---|---|---|
-| `predeploy.mjs` | a call to a method the target file does not define, a migration shipping with the code, a new env var with no fallback — read straight from the diff | **before the code is deployed** |
-| `watch.mjs` — new signature | a prod error whose shape has never been seen before | within 5 minutes of the first occurrence |
-| `watch.mjs` — spike | a module 3× over its own rolling median | within 5 minutes |
-
-Every alert names the PR that last touched that module, raises a macOS notification, and shows as a red banner on the dashboard. A fresh `Deploy to prod` is detected and shown too — as a nudge, not a trigger.
-
-Tested against the real bug this was built after: run `predeploy.mjs --sha 85711d16` on the share-link commit and it reports the missing `getSharedProduct` from the diff alone — the same bug that took two days and 44 production errors to surface the slow way. Across fifteen recent commits it produced four findings in total, so it is quiet enough to trust.
-
 ## Who starts a run
 
 **Nothing starts an audit except you.** Hit **Run audit** (or type `/feature-audit`) and everything after that click is automatic: collect, deploy status, probes across logs, events, database and code, section 1 published with the checkpoint moved, then the health section appended. No schedule, no deploy trigger — model time is spent only when you ask for it.
 
 The layers below run by themselves because they cost nothing: git reads and prod queries, no model calls. They are what tells you a report is worth asking for.
-
-## Knowing before you ask
-
-`scripts/monitor.mjs` runs every five minutes from a launchd agent (`com.primetrace.feature-audit-monitor.plist`, installed once with `launchctl bootstrap gui/$UID <plist>`; `start.sh` re-arms it if it ever gets unloaded). Each pass:
-
-- dashboard not answering on any port from 8999 → **starts it**
-- a run with no output for more than eight minutes → **stops it**, so the next run is not blocked
-- `state.json` parses and every repo has a checkpoint
-- every repo is still on its own branch — an audit that leaves a checkout switched is a failure
-- prod Loki answers a probe query
-- runs the prod error watcher and reports fresh prod deploys (it never starts a run itself)
-
-Results go to `health.json` and `monitor.log`, and the dashboard header shows **● monitor ok** with the per-check detail on hover.
 
 ## State
 
@@ -106,7 +79,6 @@ For the database lens, put a read-only account in `<dataDir>/db.json` (`{host, u
 | `crashscan.mjs` | greps prod for crash-shaped errors across every app, all patterns in parallel |
 | `prodhealth.mjs` | read-only prod SQL: seven-day series for orders, deliveries, returns, refunds, plus stuck-work counts |
 | `monitor.mjs` | the five-minute self-heal pass |
-| `watch.mjs` | rolling prod error baseline: new signatures, spikes, pre-deploy risks, deploy detection |
 | `predeploy.mjs` | static risk read of a commit before it ships |
 | `record.mjs` | appends a report and advances checkpoints (`--health` records without advancing) |
 | `server.mjs` | the dashboard |
