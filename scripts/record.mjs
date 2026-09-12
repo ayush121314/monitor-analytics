@@ -1,6 +1,7 @@
 import { readFileSync, writeFileSync, appendFileSync, existsSync, mkdirSync } from 'node:fs'
 import path from 'node:path'
-import { loadConfig, loadState, saveState, istStamp } from './lib.mjs'
+import { execFileSync } from 'node:child_process'
+import { SKILL_DIR, loadConfig, loadState, saveState, istStamp } from './lib.mjs'
 
 function parseArgs (argv) {
   const out = { advance: [], dry: false }
@@ -13,6 +14,10 @@ function parseArgs (argv) {
     else if (a === '--dry') out.dry = true
   }
   return out
+}
+
+function refreshStatus () {
+  try { execFileSync(process.execPath, [path.join(SKILL_DIR, 'scripts', 'status.mjs')], { timeout: 60000, stdio: 'ignore' }) } catch {}
 }
 
 const args = parseArgs(process.argv.slice(2))
@@ -39,6 +44,7 @@ if (args.append) {
     process.exit(0)
   }
   writeFileSync(findingsPath, next)
+  refreshStatus()
   console.log(JSON.stringify({ appended: true, chars: body.length, findings: findingsPath }, null, 2))
   process.exit(0)
 }
@@ -95,5 +101,6 @@ for (const m of moves) {
 }
 state.runs = runNo
 saveState(cfg, state)
+refreshStatus()
 
 console.log(JSON.stringify({ recorded: true, run: runNo, findings: findingsPath, advanced: moves.map(m => `${m.name}=${m.sha.slice(0, 8)}`) }, null, 2))

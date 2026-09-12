@@ -1,4 +1,7 @@
-import { loadConfig, loadState, saveState, git, gitOk, gh, toIst } from './lib.mjs'
+import { execFileSync } from 'node:child_process'
+import { existsSync } from 'node:fs'
+import path from 'node:path'
+import { loadConfig, loadState, saveState, git, gitOk, gh, toIst, expand } from './lib.mjs'
 
 function parseArgs (argv) {
   const out = { repos: [], limit: 40, fetch: true, status: false, since: null }
@@ -222,6 +225,31 @@ function collectRepo (cfg, state, repo, args) {
   }
 }
 
+function refreshGraph (repo) {
+  if (!existsSync(path.join(repo.path, 'graphify-out', 'graph.json'))) return null
+  try {
+    execFileSync('graphify', ['update', repo.path], { timeout: 10 * 60 * 1000, stdio: 'ignore' })
+    return 'graph rebuilt'
+  } catch {
+    return 'graph rebuild failed'
+  }
+}
+
+function remergeGraph (cfg) {
+  const merged = expand(cfg.graph?.merged)
+  if (!merged) return null
+  const parts = cfg.repos
+    .map(r => path.join(r.path, 'graphify-out', 'graph.json'))
+    .filter(p => existsSync(p))
+  if (parts.length < 2) return null
+  try {
+    execFileSync('graphify', ['merge-graphs', ...parts, '--out', merged], { timeout: 5 * 60 * 1000, stdio: 'ignore' })
+    return merged
+  } catch {
+    return null
+  }
+}
+
 const args = parseArgs(process.argv.slice(2))
 const cfg = loadConfig()
 const state = loadState(cfg)
@@ -234,12 +262,20 @@ if (args.status) {
 
 const wanted = args.repos.length ? cfg.repos.filter(r => args.repos.includes(r.name)) : cfg.repos
 const out = { generatedAt: new Date().toISOString(), generatedAtIst: toIst(new Date().toISOString()), repos: [] }
+let graphStale = false
 for (const repo of wanted) {
   try {
-    out.repos.push(collectRepo(cfg, state, repo, args))
+    const res = collectRepo(cfg, state, repo, args)
+    if (res.ok && res.totalPending > 0 && cfg.graph?.refreshOnNewCommits) {
+      res.graphNote = refreshGraph(repo)
+      if (res.graphNote === 'graph rebuilt') graphStale = true
+    }
+    out.repos.push(res)
   } catch (e) {
     out.repos.push({ name: repo.name, ok: false, error: String(e.message).slice(0, 400) })
   }
 }
+if (graphStale) out.mergedGraph = remergeGraph(cfg)
+else out.mergedGraph = expand(cfg.graph?.merged) || null
 saveState(cfg, state)
 console.log(JSON.stringify(out, null, 2))

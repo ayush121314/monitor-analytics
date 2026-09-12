@@ -53,10 +53,15 @@ The layers below run by themselves because they cost nothing: git reads and prod
 | File | Purpose |
 |---|---|
 | `<dataDir>/state.json` | per-repo checkpoint (last analysed commit) + deploy cache |
+| `<dataDir>/STATUS.md` | **what is broken right now** — rewritten by every run: open items, how far each repo is checked, what the last run cost, whether the tool is healthy |
 | `<dataDir>/FINDINGS.md` | append-only report log, newest run at the bottom |
 | `<dataDir>/PREFERENCES.md` | standing instructions honoured by every run |
 | `<dataDir>/runs/` | per-run log, collected evidence, and metadata (tokens, cost) |
 | `<dataDir>/discussions/` | per-report chat threads |
+
+## The design
+
+[HOW-IT-WORKS.md](HOW-IT-WORKS.md) is the reasoning behind all of this — the five evidence sources and why each is load-bearing, the mechanisms that took real digging to find, what went wrong while building it, and the order to rebuild it in for a different system.
 
 ## Install
 
@@ -81,6 +86,7 @@ For the database lens, put a read-only account in `<dataDir>/db.json` (`{host, u
 | `crashscan.mjs` | greps prod for crash-shaped errors across every app, all patterns in parallel |
 | `prodhealth.mjs` | read-only prod SQL: seven-day series for orders, deliveries, returns, refunds, plus stuck-work counts |
 | `monitor.mjs` | the five-minute self-heal pass |
+| `status.mjs` | rewrites STATUS.md from the latest reports, state and health |
 | `predeploy.mjs` | static risk read of a commit before it ships |
 | `record.mjs` | appends a report and advances checkpoints (`--health` records without advancing) |
 | `server.mjs` | the dashboard |

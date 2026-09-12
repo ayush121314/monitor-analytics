@@ -134,7 +134,8 @@
   details.block[open] > summary::before { transform:rotate(90deg); }
   details.block > .inner { padding:2px 15px 14px; }
   details.sub { border:0; border-top:1px solid var(--line); border-radius:0; margin:0; background:none; }
-  details.sub > summary { font-weight:500; color:var(--muted); font-size:12.5px; text-transform:uppercase; letter-spacing:.4px; }
+  details.sub > summary { font-weight:600; color:var(--text); font-size:13px; letter-spacing:0; opacity:.85; }
+  details.sub > summary:hover { opacity:1; }
   details.sub > .inner { padding:0 0 12px; }
   details.feat { border:1px solid var(--line); border-left-width:3px; border-radius:10px; background:var(--panel2); margin-bottom:10px; }
   details.feat > summary { cursor:pointer; list-style:none; padding:11px 15px; display:flex; gap:10px; align-items:baseline; flex-wrap:wrap; }
@@ -418,13 +419,8 @@ function renderReport (body) {
   }
   html.push('</div></details>')
 
+  const numbered = root.subs.filter(x => /^\s*\d+[.\s·)]/.test(x.title))
   const isHealth = t => /health|crash|sanity|error|also seen|method|caveat|needs attention|tod to nahi|^2[.\s]/i.test(t)
-  const groups = { feat: [], health: [] }
-  const rootLoose = { title: 'Other', subs: [], items: root.items }
-  if (root.items.length) groups.feat.push(rootLoose)
-  for (const section of root.subs) {
-    (isHealth(section.title) ? groups.health : groups.feat).push(section)
-  }
 
   const countFeats = node => {
     let n = node.items.filter(i => i.type === 'feat').length
@@ -432,23 +428,37 @@ function renderReport (body) {
     return n
   }
 
-  const renderGroup = (label, sections, note) => {
-    if (!sections.length) return
-    const total = sections.reduce((a, s) => a + countFeats(s), 0)
-    html.push(`<details class="block"><summary>${label}${total ? ` <span class="cnt">${total}</span>` : ''}</summary><div class="inner">`)
-    for (const section of sections) {
-      const inner = itemsHtml(section) + section.subs.map(sub =>
-        `<details class="block sub"><summary>${inline(sub.title)}</summary><div class="inner">${itemsHtml(sub)}</div></details>`).join('')
-      if (section.title === 'Other') { html.push(inner); continue }
-      const c = countFeats(section)
-      html.push(`<details class="block sub"><summary>${inline(section.title)}${c ? ` <span class="cnt">${c}</span>` : ''}</summary><div class="inner">${inner}</div></details>`)
-    }
-    if (note) html.push(`<div class="meta-line">${note}</div>`)
-    html.push('</div></details>')
+  const renderSection = (section, cls) => {
+    const c = countFeats(section)
+    const inner = itemsHtml(section) + section.subs.map(sub => {
+      const sc = countFeats(sub)
+      return `<details class="block sub"><summary>${inline(sub.title)}${sc ? ` <span class="cnt">${sc}</span>` : ''}</summary><div class="inner">${itemsHtml(sub)}</div></details>`
+    }).join('')
+    html.push(`<details class="block ${cls || ''}"><summary>${inline(section.title)}${c ? ` <span class="cnt">${c}</span>` : ''}</summary><div class="inner">${inner}</div></details>`)
   }
 
-  renderGroup('1 · Features shipped', groups.feat)
-  renderGroup('2 · Health &amp; sanity', groups.health)
+  if (numbered.length >= 2) {
+    if (root.items.length) html.push(itemsHtml(root))
+    for (const section of root.subs) renderSection(section)
+  } else {
+    const groups = { feat: [], health: [] }
+    const rootLoose = { title: 'Other', subs: [], items: root.items }
+    if (root.items.length) groups.feat.push(rootLoose)
+    for (const section of root.subs) (isHealth(section.title) ? groups.health : groups.feat).push(section)
+
+    const renderGroup = (label, sections) => {
+      if (!sections.length) return
+      const total = sections.reduce((a, x) => a + countFeats(x), 0)
+      html.push(`<details class="block"><summary>${label}${total ? ` <span class="cnt">${total}</span>` : ''}</summary><div class="inner">`)
+      for (const section of sections) {
+        if (section.title === 'Other') { html.push(itemsHtml(section)); continue }
+        renderSection(section, 'sub')
+      }
+      html.push('</div></details>')
+    }
+    renderGroup('1 · Features shipped', groups.feat)
+    renderGroup('2 · Health &amp; sanity', groups.health)
+  }
 
   html.push(`<details class="raw"><summary>raw markdown</summary><pre>${esc(body)}</pre></details>`)
   return html.join('\n')

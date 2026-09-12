@@ -49,5 +49,9 @@
       "vaultRepo": "ecommerce-async-worker",
       "managed": true
     }
-  ]
+  ],
+  "graph": {
+    "merged": "~/Desktop/IMP/feature-audits/merged-graph.json",
+    "refreshOnNewCommits": true
+  }
 }
