@@ -3,37 +3,51 @@
   "dataDir": "~/Desktop/IMP/feature-audits",
   "bootstrapDays": 7,
   "grafana": {
-    "prod": { "addr": "https://grafana.crafto.app", "lokiUid": "P8E80F9AEF21F6940", "tokenEnv": "GRAFANA_TOKEN_PROD" },
-    "stage": { "addr": "https://grafana.stage.crafto.app", "lokiUid": "P3D2855197A3EFBB4", "tokenEnv": "GRAFANA_TOKEN_STAGE" }
+    "prod": {
+      "addr": "https://grafana.crafto.app",
+      "lokiUid": "P8E80F9AEF21F6940",
+      "tokenEnv": "GRAFANA_TOKEN_PROD"
+    },
+    "stage": {
+      "addr": "https://grafana.stage.crafto.app",
+      "lokiUid": "P3D2855197A3EFBB4",
+      "tokenEnv": "GRAFANA_TOKEN_STAGE"
+    }
   },
-  "amplitude": { "project": "760327", "projectName": "DealShop" },
+  "amplitude": {
+    "project": "760327",
+    "projectName": "DealShop"
+  },
   "repos": [
     {
       "name": "ecommerce-backend",
-      "path": "~/Downloads/WORK/ecommerce-backend",
+      "path": "~/Downloads/WORK/ecommerce-backend-3",
       "branch": "main",
       "lokiApp": "ecommerce-backend",
       "workflow": "nodejs-eks.yml",
       "prodJob": "Deploy to prod",
-      "vaultRepo": "ecommerce-backend"
+      "vaultRepo": "ecommerce-backend",
+      "managed": true
     },
     {
       "name": "ecom-cron-worker",
-      "path": "~/Downloads/WORK/ecom-cron-worker",
+      "path": "~/Downloads/WORK/ecom-cron-worker-3",
       "branch": "main",
       "lokiApp": "ecom-cron-worker",
       "workflow": "nodejs-eks.yml",
       "prodJob": "Deploy to prod",
-      "vaultRepo": "ecom-cron-worker"
+      "vaultRepo": "ecom-cron-worker",
+      "managed": true
     },
     {
       "name": "ecommerce-async-worker",
-      "path": "~/Downloads/WORK/ecommerce-async-worker",
+      "path": "~/Downloads/WORK/ecommerce-async-worker-3",
       "branch": "main",
       "lokiApp": "ecommerce-async-worker",
       "workflow": "nodejs-eks.yml",
       "prodJob": "Deploy to prod",
-      "vaultRepo": "ecommerce-async-worker"
+      "vaultRepo": "ecommerce-async-worker",
+      "managed": true
     }
   ]
 }

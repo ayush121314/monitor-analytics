@@ -149,7 +149,20 @@ function collectRepo (cfg, state, repo, args) {
   if (!gitOk(repo.path, ['rev-parse', '--git-dir'])) {
     return { ...result, ok: false, error: 'repo path is not a git checkout' }
   }
-  if (args.fetch) git(repo.path, ['fetch', '--quiet', 'origin', repo.branch], { soft: true })
+  if (args.fetch) {
+    git(repo.path, ['fetch', '--quiet', 'origin', repo.branch], { soft: true })
+    if (repo.managed) {
+      const dirty = git(repo.path, ['status', '--porcelain', '--untracked-files=no'], { soft: true })
+      const branch = git(repo.path, ['rev-parse', '--abbrev-ref', 'HEAD'], { soft: true })
+      if (dirty) {
+        result.managedNote = `left alone: ${repo.path} has uncommitted changes`
+      } else {
+        if (branch !== repo.branch) git(repo.path, ['checkout', '--quiet', repo.branch], { soft: true })
+        git(repo.path, ['pull', '--quiet', '--ff-only', 'origin', repo.branch], { soft: true })
+        result.managedNote = `checked out ${repo.branch} and pulled`
+      }
+    }
+  }
 
   const ref = `origin/${repo.branch}`
   const head = git(repo.path, ['rev-parse', ref])

@@ -66,6 +66,8 @@ The layers below run by themselves because they cost nothing: git reads and prod
 
 Then edit `config.json`: repo paths, the Loki app label per repo, the deploy workflow file and its prod job name, and `dataDir`.
 
+Give the audit its **own checkouts**. A repo marked `"managed": true` is put on its branch and pulled before every run, so the audit always reads the real `main` — never whatever branch you happen to be working on. Here that means `ecommerce-backend-3`, `ecom-cron-worker-3`, `ecommerce-async-worker-3`, cloned once and never opened by hand. A managed checkout with uncommitted changes is left alone rather than forced.
+
 Requires: Node 20+, `git`, `gh`, `jq`, the `mysql` client, a Grafana token in the environment, and Claude Code logged in (the dashboard shells out to `claude -p`).
 
 For the database lens, put a read-only account in `<dataDir>/db.json` (`{host, user, password, database}`) or set `FA_DB_HOST` / `FA_DB_USER` / `FA_DB_PASS` / `FA_DB_NAME`. That file lives outside the repo and is gitignored — never commit credentials.
