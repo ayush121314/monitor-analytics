@@ -91,7 +91,7 @@ node scripts/grafana.mjs --repo ecommerce-backend --module services.v1.refund.in
 node scripts/grafana.mjs --repo ecommerce-backend --grep "someDistinctString" --from now-6h
 node scripts/grafana.mjs --repo ecom-cron-worker --module <module> --from now-24h --count
 ```
-Set `--from` from `liveSince` (round to `now-Nh` covering it). Read `levels`, `events`, `modules`, and the `samples`. An error sample that names the changed module after `liveSince` is a finding — quote the `msg`/`err` in the report.
+Keep payloads small: `--limit 200` is plenty for a sweep (the summary counts modules for you), and `--count` when you only need a number — a 1000-line pull wastes context and has been seen to kill a headless run. Set `--from` from `liveSince` (round to `now-Nh` covering it). Read `levels`, `events`, `modules`, and the `samples`. An error sample that names the changed module after `liveSince` is a finding — quote the `msg`/`err` in the report.
 
 **Amplitude (prod events).** Project `760327` (DealShop).
 - Event names in this project are **snake_case** (`order_placed`, `payment_success`). Never guess a name — resolve it first with `search_amp_data_taxonomy` (projectId `760327`).
@@ -175,6 +175,8 @@ node scripts/record.mjs --body <section2>.md --append
 
 `--append` folds the new text into the report block already written, so the user sees the features immediately and the health picture lands a few minutes later. Use `--dry` on either call when unsure.
 
+**Record with `--advance` exactly once per run.** If later evidence contradicts what you already published — you will find this happens, and finding it is good — do **not** record a second report. Write the correction as a short `#### Correction` block and `--append` it to the same report, naming what the earlier text claimed and what the evidence actually shows. Two reports for one run breaks the log and double-counts the window.
+
 Advance to the newest **analyzed** sha per repo (usually `head.sha` from the collect output). Skip `--advance` for any repo you did not finish — it simply shows up again next run. Run `--dry` first when unsure. (The dashboard auto-advances a checkpoint if a report was appended and the AI forgot, so never advance a repo you did not actually analyse.)
 
 Finally, tell the user in chat: the bottom line, the counts, and only the 🔴/🟡-worth-reading items in full. Point at `FINDINGS.md` and the dashboard for the rest.
@@ -204,7 +206,8 @@ More than ~6 changes to analyze: dispatch one subagent per change (or per repo) 
 - **`ORDER_FAILED`** is a real order status (pincode not serviceable) — exclude it from "orders" comparisons.
 - **Timestamps**: Loki/GitHub return UTC, report IST (`liveSinceIst`, `dateIst` are already IST).
 - **Never write scratch files into a repo.** Temp scripts, JSON dumps and findings drafts go to the session scratchpad or `/tmp`, never inside `ecommerce-backend/` or any other checkout — a stray file there shows up in the user's `git status`.
-- **Never touch git state** (no commit/push/checkout/branch) and never write to prod DB or Redis. Read-only everywhere.
+- **Never touch git state. This is absolute.** No `commit`, `checkout`, `switch`, `branch`, `stash`, `merge`, `cherry-pick`, `reset`, `add`, `push` — not even "just on a scratch branch". The user handles git himself; an audit that leaves his repo on a different branch has broken his workspace. The only git you may run is read-only: `log`, `show`, `diff`, `grep`, `rev-parse`, `merge-base`, `cat-file`, `branch --list`, `fetch`. If you work out a fix, **describe it in the report** (file, line, what to change, and the commit to copy it from) — do not apply it.
+- Never write to prod DB or Redis. Read-only everywhere.
 - Grafana tokens come from `~/.zshrc` (`GRAFANA_TOKEN_PROD`; the stage token has been expired since 24-Aug).
 - The dashboard's report discussion writes standing instructions into `PREFERENCES.md`. When answering there, append any "from now on…" instruction to that file yourself and confirm it in one line.
 - `gh` runs with the `gho_` token from `git credential fill` — the shell `GITHUB_TOKEN` is `read:org` only and will 404.

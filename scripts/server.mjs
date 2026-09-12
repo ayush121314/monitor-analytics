@@ -133,6 +133,8 @@ function saveMeta (job, extra = {}) {
     endedAt: job.endedAt || null,
     durationMs: job.endedAt ? new Date(job.endedAt) - new Date(job.startedAt) : null,
     pending: job.pending ?? null,
+    phase: job.phase || null,
+    percent: job.percent ?? null,
     live: job.live ?? null,
     repos: job.repos || [],
     runNumber: job.runNumber ?? null,
@@ -152,22 +154,50 @@ function startJob (opts = {}) {
   jobSeq++
   const id = `${new Date().toISOString().replace(/[:.]/g, '-')}-audit-${jobSeq}`
   const job = {
-    id, kind: 'audit', status: 'running', startedAt: new Date().toISOString(),
+    id, kind: 'audit', status: 'running', startedAt: new Date().toISOString(), phase: 'starting', percent: 2, toolCalls: 0,
     lines: [], subscribers: new Set(), exitCode: null, child: null,
     repos: opts.repos || [], usage: null, costUsd: null, pending: null, live: null, outcome: null, runNumber: null
   }
   jobs.set(id, job)
   writeFileSync(jobLogPath(id), `# audit ${id}\n# started ${istStamp()}\n# options ${JSON.stringify(opts)}\n\n`)
 
+  const setPhase = (phase, percent) => {
+    job.phase = phase
+    if (percent > (job.percent || 0)) job.percent = percent
+  }
+
+  const trackProgress = line => {
+    if (/record\.mjs[^\n]*--append/.test(line)) return setPhase('publishing the health section', 95)
+    if (/record\.mjs[^\n]*--health/.test(line)) return setPhase('publishing the health report', 92)
+    if (/record\.mjs/.test(line)) return setPhase(job.healthOnly ? 'publishing the health report' : 'publishing the features section', job.healthOnly ? 92 : 62)
+    if (/crashscan\.mjs/.test(line)) return setPhase('crash scan across all apps', 72)
+    if (/--level error/.test(line)) return setPhase('prod error sweep', 80)
+    if (/mcp__Amplitude/.test(line)) return setPhase('checking Amplitude events', Math.min(55, 20 + (job.toolCalls || 0)))
+    if (/grafana\.mjs/.test(line)) return setPhase('reading prod logs', Math.min(55, 20 + (job.toolCalls || 0)))
+    if (/prodq|mysql|information_schema/.test(line)) return setPhase('checking prod database', Math.min(55, 20 + (job.toolCalls || 0)))
+    if (/git (show|diff|log)/.test(line)) return setPhase('reading the code changes', Math.min(55, 20 + (job.toolCalls || 0)))
+    if (/^ +· /.test(line)) { job.toolCalls = (job.toolCalls || 0) + 1; return setPhase(job.phase || 'analysing', Math.min(55, 20 + job.toolCalls)) }
+    if (/new since checkpoint/.test(line)) return setPhase('found the new changes', 12)
+    if (/handing over to the AI/.test(line)) return setPhase('analysing each change', 18)
+    if (/No new commits/.test(line)) return setPhase('no new commits — health check only', 40)
+    if (/checking what has landed/.test(line)) return setPhase('collecting changes', 5)
+  }
+
   const push = text => {
+    job.lastOutputAt = Date.now()
     for (const chunk of String(text).split('\n')) {
       if (!chunk.length) continue
       job.lines.push(chunk)
+      trackProgress(chunk)
       appendFileSync(jobLogPath(id), chunk + '\n')
       for (const res of job.subscribers) res.write(`data: ${JSON.stringify(chunk)}\n\n`)
     }
   }
   const finish = code => {
+    if (job.watchdog) clearTimeout(job.watchdog)
+    if (job.stallTimer) clearInterval(job.stallTimer)
+    job.phase = 'finished'
+    job.percent = 100
     job.status = 'done'
     job.exitCode = code
     job.endedAt = new Date().toISOString()
@@ -237,6 +267,7 @@ function startJob (opts = {}) {
     job.live = live
 
     const healthOnly = pending === 0
+    job.healthOnly = healthOnly
     if (healthOnly) {
       push('')
       push('No new commits since the last check — skipping the per-feature analysis.')
@@ -251,6 +282,7 @@ function startJob (opts = {}) {
     if (opts.since) extras.push(`start from ${opts.since} instead of the saved checkpoint`)
     if (opts.dry) extras.push('do not advance the checkpoint (dry run)')
     if (opts.note) extras.push(opts.note)
+    extras.push('absolutely do not touch git state — no commit, checkout, branch, stash or push; read-only git only. If you find a fix, describe it in the report instead of applying it')
     extras.push('keep it tight: publish section 1 within ~10 minutes of starting and finish the whole run in ~20 — if a probe has not settled after two follow-ups, write the honest 🟡 and move on rather than chasing an exact minute')
     if (extras.length) prompt += ' ' + extras.join('; ')
 
@@ -338,7 +370,7 @@ function history (days = 7) {
   }
   for (const job of jobs.values()) {
     if (job.status === 'running' && !rows.find(r => r.id === job.id)) {
-      rows.push({ id: job.id, kind: job.kind, status: 'running', startedAt: job.startedAt, startedAtIst: toIst(job.startedAt), totalTokens: 0, outcome: null, pending: job.pending })
+      rows.push({ id: job.id, kind: job.kind, status: 'running', startedAt: job.startedAt, startedAtIst: toIst(job.startedAt), totalTokens: 0, outcome: null, pending: job.pending, phase: job.phase, percent: job.percent })
     }
   }
   return rows.sort((a, b) => a.startedAt < b.startedAt ? 1 : -1)
@@ -370,7 +402,10 @@ const server = createServer(async (req, res) => {
         tokens: rows.reduce((a, r) => a + (r.totalTokens || 0), 0),
         cost: rows.reduce((a, r) => a + (r.costUsd || 0), 0)
       },
-      running: [...jobs.values()].find(j => j.status === 'running')?.id || null,
+      running: (() => {
+        const j = [...jobs.values()].find(x => x.status === 'running')
+        return j ? { id: j.id, phase: j.phase, percent: j.percent, startedAt: j.startedAt, startedAtIst: toIst(j.startedAt), pending: j.pending } : null
+      })(),
       repos: cfg.repos.map(r => ({
         name: r.name, path: r.path, branch: r.branch, lokiApp: r.lokiApp, workflow: r.workflow, prodJob: r.prodJob,
         ...(state.repos[r.name] || { last_sha: null, last_pr: null, last_run_at_ist: null })
@@ -396,7 +431,7 @@ const server = createServer(async (req, res) => {
   if (route === '/api/job' && url.searchParams.get('id')) {
     const id = url.searchParams.get('id')
     const live = jobs.get(id)
-    if (live) return send(res, 200, { id, status: live.status, lines: live.lines })
+    if (live) return send(res, 200, { id, status: live.status, phase: live.phase, percent: live.percent, lines: live.lines })
     const p = jobLogPath(id)
     if (!existsSync(p)) return send(res, 404, { error: 'not found' })
     return send(res, 200, { id, status: 'done', lines: readFileSync(p, 'utf8').split('\n') })
