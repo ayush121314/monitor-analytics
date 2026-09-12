@@ -106,22 +106,6 @@ let grafanaOk = false
 try { grafanaOk = !JSON.parse(grafana.out).error } catch {}
 record('grafana', grafanaOk, grafanaOk ? 'prod Loki answering' : 'prod Loki query failed — check GRAFANA_TOKEN_PROD')
 
-const watch = await sh(process.execPath, [path.join(SKILL_DIR, 'scripts', 'watch.mjs')], { timeout: 120000 })
-let watchOut = null
-try { watchOut = JSON.parse(watch.out) } catch {}
-if (watchOut) {
-  record('watch', true, `${watchOut.signaturesKnown} signatures · ${watchOut.modulesTracked} modules · ${watchOut.newAlerts} new alert(s)`)
-  for (const a of watchOut.alerts || []) {
-    const who = a.blame?.prs?.length ? ` (last touched by PR #${a.blame.prs.join(', #')})` : ''
-    log(`ALERT ${a.kind} — ${a.app} ${a.module || ''}: ${a.detail}${who}`)
-  }
-  for (const d of watchOut.deploysDetected || []) {
-    log(`deploy detected: ${d.repo} ${d.sha} live at ${d.atIst} — waiting for you to hit Run`)
-  }
-} else {
-  record('watch', false, 'error watcher did not return JSON')
-}
-
 const health = {
   at: new Date().toISOString(),
   atIst: istStamp(),

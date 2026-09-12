@@ -206,18 +206,7 @@ Finally, tell the user in chat: the bottom line, the counts, and only the 🔴/�
 
 **A report is never produced on its own.** The audit runs only when the user hits **Run audit** (or types `/feature-audit`) — nothing schedules it, nothing triggers it on a deploy. Their money, their call.
 
-What *does* run by itself is free — no model calls, just git and prod queries. One launchd agent runs `scripts/monitor.mjs` every five minutes:
-
-1. **Heals** — dashboard down → started; a run idle past 8 minutes → stopped; repos checked for a switched branch; prod Loki probed.
-2. **Watches prod** (`scripts/watch.mjs`) — the last 15 minutes of errors per app, raising an alert for
-   - **a never-seen error signature** — the strongest "something just broke" signal,
-   - **a spike** — a module 3× over its own rolling median,
-   - **a pre-deploy risk** — `scripts/predeploy.mjs` over merged-but-undeployed commits: a call to a method the target file does not define, a migration riding with the code, a new env var with no fallback.
-3. **Notices a deploy** — a fresh successful `Deploy to prod` is logged and shown, so the user knows a report is worth asking for. It does not start one.
-
-Every alert names the PR that last touched that module, fires a macOS notification and shows as a red banner on the dashboard; the same alert is not repeated for 6 hours. When a run the user started finishes, a notification carries its tally and bottom line.
-
-So the loop is: the watcher tells them something moved, they hit Run, and everything after that click is automatic.
+The only thing that runs unattended is `scripts/monitor.mjs`, once every five minutes from a launchd agent, and it only keeps the tool itself healthy: dashboard down → started; a run idle past 8 minutes → stopped; every repo checked for a switched branch; `state.json` parsed; prod Loki probed. It never starts a run and never raises product alerts.
 
 ## UI
 

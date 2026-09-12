@@ -505,30 +505,6 @@ const server = createServer(async (req, res) => {
     try { return send(res, 200, JSON.parse(readFileSync(p, 'utf8'))) } catch { return send(res, 200, { ok: null, checks: [] }) }
   }
 
-  if (route === '/api/alerts') {
-    const p = path.join(cfg.dataDir, 'alerts.json')
-    if (!existsSync(p)) return send(res, 200, { open: [], deploys: [] })
-    try { return send(res, 200, JSON.parse(readFileSync(p, 'utf8'))) } catch { return send(res, 200, { open: [], deploys: [] }) }
-  }
-
-  if (route === '/api/alerts/ack' && req.method === 'POST') {
-    const body = await readBody(req)
-    const wp = path.join(cfg.dataDir, 'watch-state.json')
-    if (!existsSync(wp)) return send(res, 200, { ok: true })
-    try {
-      const ws = JSON.parse(readFileSync(wp, 'utf8'))
-      ws.alerts = (ws.alerts || []).filter(a => body.key ? a.key !== body.key : false)
-      writeFileSync(wp, JSON.stringify(ws, null, 2))
-      const ap = path.join(cfg.dataDir, 'alerts.json')
-      if (existsSync(ap)) {
-        const cur = JSON.parse(readFileSync(ap, 'utf8'))
-        cur.open = (cur.open || []).filter(a => body.key ? a.key !== body.key : false)
-        writeFileSync(ap, JSON.stringify(cur, null, 2))
-      }
-      return send(res, 200, { ok: true })
-    } catch { return send(res, 200, { ok: false }) }
-  }
-
   if (route === '/api/runs') return send(res, 200, parseFindings())
   if (route === '/api/history') return send(res, 200, history(Number(url.searchParams.get('days') || 7)))
   if (route === '/api/findings') {
