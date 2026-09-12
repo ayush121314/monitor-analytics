@@ -200,6 +200,23 @@ Advance to the newest **analyzed** sha per repo (usually `head.sha` from the col
 
 Finally, tell the user in chat: the bottom line, the counts, and only the 🔴/🟡-worth-reading items in full. Point at `FINDINGS.md` and the dashboard for the rest.
 
+## The automated flow (nobody has to remember anything)
+
+One launchd agent runs `scripts/monitor.mjs` every five minutes. Each pass:
+
+1. **Heals** — dashboard down → started; a run idle past 8 minutes → stopped; repos checked for a switched branch; prod Loki probed.
+2. **Watches prod** (`scripts/watch.mjs`) — pulls the last 15 minutes of errors per app and raises an alert for
+   - **a never-seen error signature** (the strongest "something just broke" signal),
+   - **a spike** — a module 3× over its own rolling median,
+   - **a pre-deploy risk** — `scripts/predeploy.mjs` runs over merged-but-undeployed commits and flags a call to a method the target file does not define, a migration that ships with the code, or a new env var with no fallback.
+   Every alert names the PR that last touched that module, fires a macOS notification, and shows in the dashboard as a red banner. Same alert is not repeated for 6 hours.
+3. **Reacts to a deploy** — a fresh successful `Deploy to prod` starts an audit on its own, so the report exists before anyone asks.
+4. **Daily floor** — if nothing has run by 10:00 IST, it starts one anyway.
+
+When a run finishes, a macOS notification carries the tally and the bottom line.
+
+`predeploy.mjs` is worth knowing by hand too: `node scripts/predeploy.mjs --sha <sha>` on a commit before it deploys. Run against the share-link commit it reports, from the diff alone, that `productShare.js` calls `PlayStoreRedirectService.getSharedProduct()` which the service does not define — the bug that otherwise took two days and 44 prod errors to surface.
+
 ## UI
 
 `node ~/.claude/skills/feature-audit/scripts/server.mjs` serves a local dashboard on the first free port from **8999**. It has exactly one action button — **Run audit** — plus Stop while a run is live.

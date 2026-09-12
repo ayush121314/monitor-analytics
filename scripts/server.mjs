@@ -264,6 +264,7 @@ function startJob (opts = {}) {
       }
     }
     saveMeta(job)
+    notifyFinish(job, state, appended)
     for (const res of job.subscribers) { res.write('event: end\ndata: {}\n\n'); res.end() }
     job.subscribers.clear()
   }
@@ -387,6 +388,26 @@ function startJob (opts = {}) {
   return { id }
 }
 
+function notifyFinish (job, state, appended) {
+  try {
+    let title = 'Feature audit'
+    let body
+    if (job.outcome === 'no-new-commits') return
+    if (!appended) {
+      body = `run ended without a report (${job.outcome || 'stopped'})`
+    } else {
+      const reports = parseFindings()
+      const latest = reports[0]
+      const tally = (latest?.body || '').split('\n').find(l => l.startsWith('**Tally')) || ''
+      const bottom = (latest?.body || '').split('\n').find(l => l.startsWith('**Bottom line')) || ''
+      const clean = t => t.replace(/\*\*/g, '').replace(/^(Tally|Bottom line):\s*/, '').trim()
+      title = `Report ${state.runs} ready`
+      body = [clean(tally), clean(bottom)].filter(Boolean).join('\n').slice(0, 300) || 'report published'
+    }
+    execFileSync('osascript', ['-e', `display notification ${JSON.stringify(body)} with title ${JSON.stringify(title)} sound name "Glass"`], { timeout: 8000 })
+  } catch {}
+}
+
 function parseFindings () {
   const p = path.join(cfg.dataDir, 'FINDINGS.md')
   if (!existsSync(p)) return []
@@ -482,6 +503,30 @@ const server = createServer(async (req, res) => {
     const p = path.join(cfg.dataDir, 'health.json')
     if (!existsSync(p)) return send(res, 200, { ok: null, atIst: null, checks: [] })
     try { return send(res, 200, JSON.parse(readFileSync(p, 'utf8'))) } catch { return send(res, 200, { ok: null, checks: [] }) }
+  }
+
+  if (route === '/api/alerts') {
+    const p = path.join(cfg.dataDir, 'alerts.json')
+    if (!existsSync(p)) return send(res, 200, { open: [], deploys: [] })
+    try { return send(res, 200, JSON.parse(readFileSync(p, 'utf8'))) } catch { return send(res, 200, { open: [], deploys: [] }) }
+  }
+
+  if (route === '/api/alerts/ack' && req.method === 'POST') {
+    const body = await readBody(req)
+    const wp = path.join(cfg.dataDir, 'watch-state.json')
+    if (!existsSync(wp)) return send(res, 200, { ok: true })
+    try {
+      const ws = JSON.parse(readFileSync(wp, 'utf8'))
+      ws.alerts = (ws.alerts || []).filter(a => body.key ? a.key !== body.key : false)
+      writeFileSync(wp, JSON.stringify(ws, null, 2))
+      const ap = path.join(cfg.dataDir, 'alerts.json')
+      if (existsSync(ap)) {
+        const cur = JSON.parse(readFileSync(ap, 'utf8'))
+        cur.open = (cur.open || []).filter(a => body.key ? a.key !== body.key : false)
+        writeFileSync(ap, JSON.stringify(cur, null, 2))
+      }
+      return send(res, 200, { ok: true })
+    } catch { return send(res, 200, { ok: false }) }
   }
 
   if (route === '/api/runs') return send(res, 200, parseFindings())

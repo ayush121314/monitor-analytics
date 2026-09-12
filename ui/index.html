@@ -66,6 +66,15 @@
   .pill.no-new-commits { color:var(--muted); }
   .pill.running { color:var(--warn); border-color:#5c4a24; }
   .pill.error { color:var(--bad); border-color:#5c2424; }
+  .alertbox { background:#2a1618; border:1px solid #5c2424; border-left:3px solid var(--bad);
+    border-radius:9px; padding:11px 14px; margin-bottom:12px; font-size:13px; }
+  .alertbox .hd { font-weight:600; color:var(--bad); margin-bottom:6px; }
+  .alertbox .item { padding:6px 0; border-top:1px solid #40202280; display:flex; gap:10px; align-items:flex-start; }
+  .alertbox .item:first-of-type { border-top:0; }
+  .alertbox .k { font-family:var(--mono); font-size:10.5px; text-transform:uppercase; letter-spacing:.4px;
+    color:var(--bad); background:#3a1d1f; border:1px solid #5c2424; border-radius:5px; padding:1px 6px; white-space:nowrap; }
+  .alertbox .d { flex:1; min-width:0; }
+  .alertbox .who { color:var(--muted); font-size:11.5px; margin-top:2px; }
   .live { background:#1d2a1f; border:1px solid #2c4431; border-radius:9px; padding:10px 14px;
     margin-bottom:14px; font-size:13px; display:flex; align-items:flex-start; gap:9px; overflow:hidden; }
   .live .dot { width:8px; height:8px; border-radius:50%; background:var(--good); animation:pulse 1.4s infinite; flex:none; }
@@ -496,7 +505,7 @@ async function loadRuns () {
 
   runs.forEach(r => { reportBodies['run-' + r.run] = r.body })
 
-  const head = '<div id="liveBox"></div>'
+  const head = '<div id="alertBox"></div><div id="liveBox"></div>'
 
   const statusOf = r => {
     const m = metaByRun[r.run]
@@ -721,6 +730,30 @@ document.querySelectorAll('.tab').forEach(x => x.classList.toggle('on', x === t)
   document.querySelectorAll('.pane').forEach(p => p.classList.toggle('on', p.id === 'pane-' + t.dataset.pane))
 })
 
+async function loadAlerts () {
+  const box = document.getElementById('alertBox')
+  if (!box) return
+  const a = await (await fetch('/api/alerts')).json()
+  const open = (a.open || []).slice(0, 8)
+  if (!open.length) { box.innerHTML = ''; return }
+  box.innerHTML = `<div class="alertbox"><div class="hd">⚠ ${open.length} thing${open.length > 1 ? 's' : ''} the watcher caught since the last audit</div>` +
+    open.map(x => {
+      const who = x.blame?.prs?.length ? `last touched by PR #${x.blame.prs.join(', #')}` : (x.blame?.files?.[0] || '')
+      return `<div class="item">
+        <span class="k">${esc((x.kind || '').replace(/-/g, ' '))}</span>
+        <div class="d">${esc(x.detail || '')}
+          <div class="who">${esc(x.app || '')}${x.module ? ' · ' + esc(x.module) : ''}${who ? ' · ' + esc(who) : ''} · ${esc(x.atIst || '')}</div>
+        </div>
+        <button class="ghost" onclick="ackAlert('${esc(x.key || '')}')">dismiss</button>
+      </div>`
+    }).join('') + '</div>'
+}
+
+window.ackAlert = async key => {
+  await fetch('/api/alerts/ack', { method: 'POST', body: JSON.stringify({ key }) })
+  loadAlerts()
+}
+
 async function loadHealth () {
   const h = await (await fetch('/api/health')).json()
   const el = $('#health')
@@ -733,8 +766,9 @@ async function loadHealth () {
   el.title = (h.checks || []).map(c => `${c.ok ? 'ok  ' : 'FAIL'} ${c.name} — ${c.detail}${c.fixed ? ' → ' + c.fixed : ''}`).join('\n')
 }
 
-loadSummary(); loadRuns(); loadHistory(); loadPrefs(); loadHealth()
+loadSummary(); loadRuns(); loadHistory(); loadPrefs(); loadHealth(); loadAlerts()
 setInterval(loadHealth, 30000)
+setInterval(loadAlerts, 30000)
 setInterval(loadHistory, 15000)
 setInterval(async () => {
   const s = await (await fetch('/api/summary')).json()
