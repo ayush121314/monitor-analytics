@@ -16,7 +16,7 @@ For every change merged since the last checkpoint:
 | **Prod MySQL (read-only)** | Did the migration land? Is the new column/table being written? And, for the health pass, the seven-day shape of orders, deliveries, returns and refunds plus the stuck-work counts — the things a log can never answer (`scripts/prodhealth.mjs`). |
 | **The code itself** | Does it do what the PR title claims, and is the new path even reachable (flag, bucket, app-version gate)? |
 
-Each feature gets the same four lines: **what it is**, **what it cost us** (quantified, or "none"), **what was checked** (every probe with its number), **verdict**.
+A report is two sections - what shipped, and how the backend is doing - and each is a list of one-line points. Click a point and the explanation opens in plain language; the queries and counts sit underneath it in small grey type, so the same report works for someone scanning it and someone re-running it.
 
 Every report closes with two health sections: *is the new code breaking anything*, and *overall backend health* — and that second one runs three lenses, because logs alone are not a health check: **logs** (error volume per module, real failures separated from business validation), **data** (today versus the seven-day shape, plus stuck refunds and orders), and **events** (the load-bearing Amplitude events against their own baseline — a flatlined event means the emitter broke while every service still looks healthy).
 

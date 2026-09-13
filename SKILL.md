@@ -141,72 +141,44 @@ Every non-⚪ verdict carries at least one **quoted number or log line** with it
 
 ## Step 5 — Write the report and advance the checkpoint
 
-**Write a JSON file, not markdown.** The layout is fixed in the dashboard and in `render.mjs`; you supply the content. This is why every report looks the same and why nothing has to be re-formatted by hand.
+**The report is deliberately small: two sections, each a list of points. One line per point, plain words, and the explanation opens when you click it. Nothing else.**
 
 ```json
 {
-  "window": "05 → 12 Sept 2026 · 45 changes across 3 repos",
-  "tally": { "critical": 1, "important": 2, "watch": 8, "pending": 1, "reverted": 5, "working": 9, "none": 21 },
-  "prodHeads": [{ "repo": "ecommerce-backend", "sha": "b149d997", "at": "12 Sept 14:14 IST" }],
-  "appliedLearnings": ["Gupshup OTP 308s counted (2,721/24h), kept out of the findings"],
-  "bottomLine": "one sentence the reader can act on",
-
-  "features": [{
-    "name": "Share links resolved through a new endpoint",
-    "pr": 891,
-    "liveAt": "10 Sept 19:45 IST",
-    "severity": "critical",
-    "matlab": "plain line, no context needed — this is what shows in the summary",
-    "kyaHai": "what the change actually does",
-    "loss": "quantified, or \"none — <what would have shown it>\"",
-    "checked": ["Loki module=… level=error 24h → 44 lines, err …", "git grep … → still called at file:19"],
-    "verdict": "confirmed still live on main",
-    "blocks": []
-  }],
-
-  "health": {
-    "newCode": { "summary": "…", "table": [{ "pattern": "…", "app": "…", "lines 24h": "1", "verdict": "…" }], "findings": [], "blocks": [] },
-    "overall": { "summary": "…", "table": [], "findings": [
-      { "severity": "important", "title": "Courier webhooks accepted unverified",
-        "body": "9,658 in 24h across three couriers.",
-        "evidence": ["`|~ \"accepting webhook unverified\"` → 9,658/24h"],
-        "fix": "load the secrets, then flip the strict flag", "blocks": [] }
-    ] }
-  },
-
-  "needsAttention": [{ "severity": "critical", "title": "…", "why": "…" }],
-  "sections": [{ "title": "Bucket A/B — COD block (60-69)", "summary": "…", "blocks": [], "findings": [] }],
-  "method": ["prod DB read-only", "git untouched"]
+  "window": "12 → 13 Sept 2026 · 1 change",
+  "bottomLine": "one line — what a person should take away",
+  "sections": [
+    { "title": "Naye features", "points": [
+      { "severity": "critical",
+        "title": "Share link par product ka apna fbAdId nahi ja raha",
+        "explain": "Jab koi share link kholta hai, backend product dhoondhne ki koshish karta hai aur crash kar jata hai. Link phir bhi sahi product kholta hai, paisa ya order kuch nahi bigadta. Par jin products ka apna campaign tag hai (catalog ka 25%), unke PDP par COD aur banner widgets galat dikhte hain.\nFix ek line ka hai — getSharedProduct wapas daal do.",
+        "proof": ["Loki controllers.v1.productShare level=error 48h → 44 lines", "git grep getSharedProduct main → still called at productShare.js:19"] }
+    ]},
+    { "title": "Backend ki sehat", "points": [ … same shape … ] }
+  ]
 }
 ```
 
-**`severity` is the whole vocabulary:** `critical` 🔴 · `important` 🟠 · `watch` 🟡 · `pending` ⏳ (merged, never deployed) · `reverted` 🔁 · `working` ✅ · `none` ⚪ (tests, CI, docs). The dashboard sorts the summary by it, so getting it right is what makes the report skimmable.
+Rules, and there are only five:
 
-**`blocks` is the escape hatch — use it freely.** Anywhere you see `blocks`, you can add as much structure as the evidence deserves, and it renders properly in both the markdown file and the dashboard:
+1. **Two sections.** The first is what shipped in this window. The second is how the backend is doing overall. Nothing else gets a section.
+2. **`title` is one line in plain words** — what happened, not which module. "Share link par fbAdId nahi ja raha", not "productShare controller throws TypeError".
+3. **`explain` is the whole story in easy language** — three or four sentences, Hinglish is fine. What broke, who it affects, how bad, and the fix if there is one. No log lines, no module paths, no query syntax in here.
+4. **`proof` holds the technical evidence** — the queries and the counts, one string each. It renders small and grey under the explanation, so a reader can ignore it and an engineer can re-run it. Never skip it: a point without proof is a guess.
+5. **`severity` on every point:** `critical` 🔴 (paisa, order ya data ruk raha hai) · `important` 🟠 (chal raha hai par galat ya risky) · `watch` 🟡 (dekhte rehna) · `pending` ⏳ (merge hua, prod nahi gaya) · `reverted` 🔁 · `working` ✅ (verify ho gaya, theek hai) · `none` ⚪. The dashboard sorts by it, worst first.
 
-- `{"type":"table","title":"Daily counts","rows":[{"day":"11-Sep","events":174}]}` — any columns, taken from the first row's keys
-- `{"type":"list","items":[…]}` or `{"type":"numbered","items":[…]}`
-- `{"type":"kv","rows":[{"k":"orders / 1000 users","v":"−7.1%"}]}` — for comparisons
-- `{"type":"code","lang":"sql","text":"SELECT …"}` — a query someone should be able to re-run
-- `{"type":"quote","text":"…"}` — to pull one line out
-- `{"type":"text","text":"…"}` — plain prose
+Everything you gathered in Steps 2–4 still happens — it just lands as a short point with its numbers in `proof` instead of a long block. If a change needs no attention, one `working` point covers it; do not write four lines about a copy change.
 
-**Numbers belong in blocks, never in a paragraph.** A sentence carrying ten module counts is unreadable and the dashboard can only show it as a wall. Write at most two sentences of prose per lens and put every count, series or comparison in a `table` or `kv` block. The same goes for a finding: one line in `title`, the explanation in `body`, and the numbers in `evidence` or a block.
-
-And `sections` lets you add a whole block of your own — a bucket A/B, a migration audit, a one-off investigation — without bending the fixed shape. Never drop evidence because the schema "has no field for it"; put it in a block.
-
-Then record it:
+Record it:
 
 ```
 node scripts/record.mjs --data <report>.json --advance ecommerce-backend=<sha>:<pr> --advance ecom-cron-worker=<sha> --dry
 node scripts/record.mjs --data <report>.json --advance ecommerce-backend=<sha>:<pr> --advance ecom-cron-worker=<sha>
 ```
 
-`record.mjs` validates the JSON (it will tell you exactly which field is missing), renders the markdown into `FINDINGS.md`, stores the JSON for the dashboard, and rewrites `STATUS.md`. A health-only run uses `--data <file>.json --health` with `"features": []`.
+`record.mjs` validates it, renders the markdown into `FINDINGS.md`, stores the JSON for the dashboard and rewrites `STATUS.md`. A health-only run passes `--health` and leaves the first section's `points` empty. Record with `--advance` once per run; a correction appends to the same report rather than becoming a second one.
 
-**Publish in two passes when there are features to report:** record section 1 as soon as the feature verdicts are done — that moves the checkpoints — then append the health section with `record.mjs --body <health>.md --append`. Record with `--advance` exactly once per run; a correction appends to the same report, never a second one.
-
-Advance to the newest **analysed** sha per repo. Skip `--advance` for a repo you did not finish. Finally, tell the user in chat: the bottom line, the counts, and only the 🔴/🟠 items in full — point at the dashboard and `STATUS.md` for the rest.
+Then tell the user in chat: the bottom line and the 🔴/🟠 points, nothing more.
 
 ### Never re-investigate the same error twice
 
