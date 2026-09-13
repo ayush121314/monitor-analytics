@@ -18,6 +18,7 @@ function parseArgs (argv) {
     else if (a === '--expr') out.expr = argv[++i]
     else if (a === '--env') out.env = argv[++i]
     else if (a === '--count') out.count = true
+    else if (a === '--fields') out.fields = argv[++i].split(',').map(x => x.trim()).filter(Boolean)
   }
   return out
 }
@@ -132,6 +133,18 @@ try {
       if (Array.isArray(last) && last.length) value += Number(last[last.length - 1]) || 0
     }
     console.log(JSON.stringify({ env: args.env, app, expr: metric, from: args.from, to: args.to, count: value }, null, 2))
+  } else if (args.fields) {
+    const json = await query(cfg, args, expr, false)
+    const rows = extractLines(json)
+    const picked = []
+    for (const r of rows) {
+      let o = null
+      try { o = JSON.parse(r.line) } catch { continue }
+      const item = {}
+      for (const f of args.fields) if (o[f] !== undefined) item[f] = o[f]
+      if (Object.keys(item).length) picked.push(item)
+    }
+    console.log(JSON.stringify({ env: args.env, app, expr, from: args.from, to: args.to, lineCount: rows.length, rows: picked }, null, 2))
   } else {
     const json = await query(cfg, args, expr, false)
     const rows = extractLines(json)

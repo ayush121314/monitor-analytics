@@ -321,7 +321,11 @@ function startJob (opts = {}) {
     const preJobs = [
       { name: 'crashscan', args: ['crashscan.mjs', '--from', 'now-24h'] },
       { name: 'prodhealth', args: ['prodhealth.mjs'] },
-      { name: 'schemadrift', args: ['schemadrift.mjs', '--snapshot', ...(since ? ['--since', since] : [])] }
+      { name: 'schemadrift', args: ['schemadrift.mjs', '--snapshot', ...(since ? ['--since', since] : [])] },
+      { name: 'invariants', args: ['invariants.mjs'] },
+      { name: 'latency', args: ['latency.mjs', '--from', 'now-24h'] },
+      { name: 'logsweep', args: ['logsweep.mjs', '--from', 'now-24h'] },
+      { name: 'learnings', args: ['learnings.mjs'] }
     ]
     push(`precomputing section 2 inputs in the background: ${preJobs.map(j => j.name).join(', ')}`)
     for (const pj of preJobs) {

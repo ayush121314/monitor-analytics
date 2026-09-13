@@ -56,6 +56,8 @@ The layers below run by themselves because they cost nothing: git reads and prod
 | `<dataDir>/STATUS.md` | **what is broken right now** — rewritten by every run: open items, how far each repo is checked, what the last run cost, whether the tool is healthy |
 | `<dataDir>/FINDINGS.md` | append-only report log, newest run at the bottom |
 | `<dataDir>/PREFERENCES.md` | standing instructions honoured by every run |
+| `<dataDir>/invariants.json` | what must be true, with the query that settles each one |
+| `<dataDir>/latency-baseline.json` | per-module p95 the next run compares against |
 | `<dataDir>/amplitude-charts.json` | the project's real event names, the chart definitions the audit reuses, and what each property's coverage was last time |
 | `<dataDir>/runs/` | per-run log, collected evidence, and metadata (tokens, cost) |
 | `<dataDir>/discussions/` | per-report chat threads |
@@ -89,6 +91,9 @@ For the database lens, put a read-only account in `<dataDir>/db.json` (`{host, u
 | `logsweep.mjs` | every log level, not just error: failures logged as warn or info, and modules that stopped logging |
 | `schemadrift.mjs` | prod DDL snapshot + diff against the last one, and every repo migration checked against what prod actually has |
 | `bucketab.mjs` | bucket-gated features compared against every other bucket, per-user rates with a z test |
+| `invariants.mjs` | re-checks what must be TRUE, not just what ran - the only lens that catches wrong behaviour |
+| `latency.mjs` | p50/p95 per module from durationMs in the logs, against a stored baseline |
+| `learnings.mjs` | re-measures each learning against its own threshold, and names the ones that carry none |
 | `monitor.mjs` | the five-minute self-heal pass |
 | `status.mjs` | rewrites STATUS.md from the latest reports, state and health |
 | `predeploy.mjs` | static risk read of a commit before it ships |

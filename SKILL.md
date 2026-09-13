@@ -31,6 +31,14 @@ If `collect.mjs` reports **0 pending changes** for every repo, do **not** skip t
 
 Record it with `node scripts/record.mjs --body <scratch>.md --health` — that appends the report **without touching any checkpoint**. Open the chat reply with "No new commits since the last check" and then the health verdict.
 
+## Invariants — the only check that catches wrong behaviour
+
+Everything else proves the code *ran*. `invariants.json` is where the audit records what must be **true**, and `node scripts/invariants.mjs` re-checks every one of them on every run. A broken invariant is the strongest finding the audit can produce: the service is up, the logs are clean, and the system is still doing the wrong thing.
+
+Each entry is a sentence plus the query that settles it — `kind: "sql"` against prod read-only, or `kind: "loki"` for a log count — and an `expect` like `{ "field": "n", "op": "==", "value": 0 }`. A failure is 🔴 unless the entry says otherwise.
+
+**Write a new invariant whenever a feature ships something that could go quietly wrong.** That is the habit that closes the gap between "deployed" and "correct": a discount cap, a queue that must drain, a band that must not place COD orders, a column that must always be filled. One line of SQL each, and every future run guards it for free.
+
 ## Step 0 — Read the learnings and the last report
 
 `~/Desktop/IMP/feature-audits/PREFERENCES.md` is the audit's **learnings file** — what it has been told and what it must do about it: errors already known and not worth raising again, things to always check, how the user wants things reported. Each bullet is *what — why — how to apply*.
@@ -41,6 +49,8 @@ Also read the **last report at the bottom of `FINDINGS.md`** before starting —
 - avoid repeating an ambient error you already reported unless its volume or shape changed.
 
 The user reads the report for *this* run's features and the current health picture. History is your input, not his output.
+
+Run `node scripts/learnings.mjs` first: it reads each learning's own threshold and re-measures it, so a suppression that has outlived its bounds gets re-opened instead of quietly hiding a real problem. It also names the learnings that carry no threshold at all — those can never expire on their own, so give them one or delete them.
 
 **Read PREFERENCES.md before every run and apply it.** It is the user's voice, so where it conflicts with this file, it wins. In the report's summary add one line — `Applied learnings: <n>` — naming which ones changed what you reported (e.g. "suppressed the Karix webhook errors, known since 12-Sep"). If a learning looks stale (the error it excuses has changed shape, or its "stop applying when" condition is met), say so in that line instead of silently dropping it. If the file does not exist yet, nothing to do.
 
@@ -69,7 +79,7 @@ Per change you get: `sha`, `pr`, `branch`, `kind`, `subject`, `files`, `stat`, `
 
 ## Section 2 is already running while you write section 1
 
-The dashboard fires `crashscan.mjs`, `prodhealth.mjs` and `schemadrift.mjs` in the background the moment a run starts, so their output is usually sitting there before you finish the features. Read `<dataDir>/health-cache/{crashscan,prodhealth,schemadrift}.json` rather than running them again; each has a `.meta.json` beside it with the command and when it finished. Re-run a script yourself only if its file is missing, older than the run, or you need a different window.
+The dashboard fires `crashscan.mjs`, `prodhealth.mjs`, `schemadrift.mjs`, `invariants.mjs`, `latency.mjs`, `logsweep.mjs` and `learnings.mjs` in the background the moment a run starts, so their output is usually sitting there before you finish the features. Read `<dataDir>/health-cache/{crashscan,prodhealth,schemadrift,invariants,latency,logsweep,learnings}.json` rather than running them again; each has a `.meta.json` beside it with the command and when it finished. Re-run a script yourself only if its file is missing, older than the run, or you need a different window.
 
 When you do run probes by hand, run independent ones together rather than one after another:
 
