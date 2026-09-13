@@ -532,6 +532,12 @@ function renderReport (body) {
       continue
     }
 
+    const f = line.match(/^\*\*(.+?)\*\*\s*(?:\((.+?)\))?\s*[—-]+\s*(.+)$/)
+    if (f && /🔴|🟡|✅|⏳|🔁|⚪/.test(f[3])) {
+      flushFeat(); flushBuf()
+      feat = { name: f[1], sub: f[2] || '', verdict: f[3], rows: [], extra: [] }
+      continue
+    }
     const h = line.match(/^\*\*(🔴|🟠|🟡|⚠️|✅|🟢|🔵|🟣|🔧|🛠️)\s*(.+?)\.?\*\*\s*(.*)$/)
     if (h) {
       flushFeat(); flushBuf()
@@ -549,12 +555,6 @@ function renderReport (body) {
       continue
     }
 
-    const f = line.match(/^\*\*(.+?)\*\*\s*(?:\((.+?)\))?\s*[—-]+\s*(.+)$/)
-    if (f && /🔴|🟡|✅|⏳|🔁|⚪/.test(f[3])) {
-      flushFeat(); flushBuf()
-      feat = { name: f[1], sub: f[2] || '', verdict: f[3], rows: [], extra: [] }
-      continue
-    }
     if (feat && feat.finding) {
       if (!line.trim()) continue
       if (/^\|/.test(line)) { flushFeat() } else {
@@ -658,80 +658,63 @@ function renderReport (body) {
 
   const itemsHtml = node => node.items.map(it => it.type === 'feat' ? featHtml(it.feat) : it.html).join('\n')
 
-  const html = []
-  const tallyLine = head.find(h => h.startsWith('**Tally'))
-  const tiles = tallyLine ? [...tallyLine.matchAll(/(🔴|🟡|✅|⏳|🔁|⚪)\s*(\d+)\s*([a-z\- ]*)/g)].map(t => {
-    const cls = verdictClass(t[1]).replace('v-', '')
-    return `<div class="tile ${cls}"><div class="n">${t[1]} ${t[2]}</div><div class="k">${esc(t[3].trim() || 'changes')}</div></div>`
-  }) : []
+  const bottom = head.find(h => h.startsWith('**Bottom line'))
+  const windowLine = head.find(h => h.startsWith('**Window'))
 
-  html.push('<details class="block" open><summary>Summary</summary><div class="inner">')
-  if (tiles.length) html.push(`<div class="summary">${tiles.join('')}</div>`)
-  for (const h of head) {
-    if (h.startsWith('**Tally')) continue
-    if (h.startsWith('**Bottom line')) { html.push(`<div class="bottom">${inline(h)}</div>`); continue }
-    html.push(`<div class="meta-line">${inline(h)}</div>`)
-  }
-  const RANK = { CRITICAL: 0, IMPORTANT: 1, PENDING: 2, WATCH: 3, REVERTED: 4, WORKING: 5, RESOLVED: 6, NOTE: 7 }
-  const ordered = [...flat].sort((a, b) => (RANK[sevOf(a).t] ?? 9) - (RANK[sevOf(b).t] ?? 9))
-
-  if (flat.length) {
-    html.push('<div class="bullets"><div class="bt">' + flat.length + ' thing' + (flat.length > 1 ? 's' : '') + ' in this report · most serious first</div>' +
-      ordered.map((f, i) => {
-        const sv = sevOf(f)
-        return `<a href="#${f.id}" onclick="jumpTo('${f.id}');return false">
-        <span class="bi">${i + 1}.</span>
-        <span class="bsev ${sv.c}">${sv.t}</span>
-        <span class="bt2"><span class="bn">${inline(f.name)}</span> <span class="bs">— ${inline(oneLiner(f))}</span></span></a>`
-      }).join('') + '</div>')
-  }
-  if (Object.keys(counts).length > 1) {
-    html.push('<div class="filters"><button class="on" data-f="all">All</button>' +
-      VERDICTS.filter(v => counts[verdictClass(v.emoji)]).map(v =>
-        `<button data-f="${verdictClass(v.emoji)}">${v.emoji} ${v.label}</button>`).join('') + '</div>')
-  }
-  html.push('</div></details>')
-
-  const numbered = root.subs.filter(x => /^\s*\d+[.\s·)]/.test(x.title))
-  const isHealth = t => /health|crash|sanity|error|also seen|method|caveat|needs attention|tod to nahi|^2[.\s]/i.test(t)
-
-  const countFeats = node => {
-    let n = node.items.filter(i => i.type === 'feat').length
-    for (const c of node.subs) n += countFeats(c)
-    return n
-  }
-
-  const renderSection = (section, cls) => {
-    const c = countFeats(section)
-    const inner = itemsHtml(section) + section.subs.map(sub => {
-      const sc = countFeats(sub)
-      return `<details class="block sub"><summary>${inline(sub.title)}${sc ? ` <span class="cnt">${sc}</span>` : ''}</summary><div class="inner">${itemsHtml(sub)}</div></details>`
-    }).join('')
-    html.push(`<details class="block ${cls || ''}"><summary>${inline(section.title)}${c ? ` <span class="cnt">${c}</span>` : ''}</summary><div class="inner">${inner}</div></details>`)
-  }
-
-  if (numbered.length >= 2) {
-    if (root.items.length) html.push(itemsHtml(root))
-    for (const section of root.subs) renderSection(section)
-  } else {
-    const groups = { feat: [], health: [] }
-    const rootLoose = { title: 'Other', subs: [], items: root.items }
-    if (root.items.length) groups.feat.push(rootLoose)
-    for (const section of root.subs) (isHealth(section.title) ? groups.health : groups.feat).push(section)
-
-    const renderGroup = (label, sections) => {
-      if (!sections.length) return
-      const total = sections.reduce((a, x) => a + countFeats(x), 0)
-      html.push(`<details class="block"><summary>${label}${total ? ` <span class="cnt">${total}</span>` : ''}</summary><div class="inner">`)
-      for (const section of sections) {
-        if (section.title === 'Other') { html.push(itemsHtml(section)); continue }
-        renderSection(section, 'sub')
-      }
-      html.push('</div></details>')
+  const featureItems = []
+  const healthItems = []
+  const walkSplit = (node, inHealth) => {
+    const healthHere = inHealth || /health|sanity|error|also seen|needs attention|crash|tod to nahi|^2[.\s]/i.test(node.title || '')
+    for (const it of node.items) {
+      if (it.type !== 'feat') continue
+      const f = it.feat
+      const explain = f.finding
+        ? f.extra.join('\n')
+        : [
+            (f.rows.find(r => /^matlab|^meaning/i.test(r.k)) || {}).v,
+            (f.rows.find(r => /^kya hai|^what/i.test(r.k)) || {}).v,
+            (() => { const l = (f.rows.find(r => /^loss/i.test(r.k)) || {}).v; return l && !/^none\b/i.test(l) ? 'Nuksaan: ' + l : null })(),
+            (f.rows.find(r => /^verdict/i.test(r.k)) || {}).v
+          ].filter(Boolean).join('\n')
+      const proof = f.finding ? [] : ((f.rows.find(r => /^checked/i.test(r.k)) || {}).v || '').split(/;\s*(?=\(\d)/).filter(Boolean)
+      const item = { severity: f.verdict, title: f.name + (f.sub ? ` (${f.sub})` : ''), explain, proof }
+      ;(healthHere || f.finding ? healthItems : featureItems).push(item)
     }
-    renderGroup('1 · Features shipped', groups.feat)
-    renderGroup('2 · Health &amp; sanity', groups.health)
+    for (const c of node.subs) walkSplit(c, healthHere)
   }
+  walkSplit(root, false)
+
+  const SEVFROM = e => {
+    if (/🔴/.test(e)) return { c: 'sev-bad', t: 'CRITICAL', r: 0 }
+    if (/🟠|⚠️/.test(e)) return { c: 'sev-imp', t: 'IMPORTANT', r: 1 }
+    if (/⏳/.test(e)) return { c: 'sev-watch', t: 'PENDING', r: 2 }
+    if (/🟡/.test(e)) return { c: 'sev-watch', t: 'WATCH', r: 3 }
+    if (/🔁/.test(e)) return { c: '', t: 'REVERTED', r: 4 }
+    if (/✅|🟢/.test(e)) return { c: 'sev-ok', t: 'WORKING', r: 5 }
+    return { c: '', t: 'NOTE', r: 6 }
+  }
+
+  const html = []
+  if (bottom) html.push(`<div class="bottom">${inline(bottom.replace(/^\*\*Bottom line:\*\*\s*/, ''))}</div>`)
+  if (windowLine) html.push(`<div class="meta-line">${inline(windowLine)}</div>`)
+
+  let idn = 0
+  const renderPoints = (title, items, index) => {
+    const sorted = [...items].sort((a, b) => SEVFROM(a.severity).r - SEVFROM(b.severity).r)
+    html.push(`<details class="block" open><summary>${index} · ${esc(title)}${sorted.length ? ` <span class="cnt">${sorted.length}</span>` : ''}</summary><div class="inner">`)
+    if (!sorted.length) html.push('<p class="stamp">Kuch nahi.</p>')
+    for (const pt of sorted) {
+      const s = SEVFROM(pt.severity)
+      idn++
+      html.push(`<details class="finding ${s.c}" id="p${idn}" data-v="${s.c}">
+        <summary><span class="sev">${s.t}</span><span class="ft">${inline(pt.title)}</span></summary>
+        <div class="fb">${String(pt.explain || '').split('\n').filter(Boolean).map(l => `<p>${inline(l)}</p>`).join('')}${pt.proof?.length ? `<div class="proof">${pt.proof.map(x => `<div>${inline(x)}</div>`).join('')}</div>` : ''}</div>
+      </details>`)
+    }
+    html.push('</div></details>')
+  }
+  renderPoints('Naye features', featureItems, 1)
+  renderPoints('Backend ki sehat', healthItems, 2)
 
   html.push(`<details class="raw"><summary>raw markdown</summary><pre>${esc(body)}</pre></details>`)
   return html.join('\n')
