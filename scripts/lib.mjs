@@ -1,4 +1,4 @@
-import { execFileSync } from 'node:child_process'
+import { execFileSync, execFile } from 'node:child_process'
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs'
 import { homedir } from 'node:os'
 import path from 'node:path'
@@ -88,6 +88,35 @@ export function gh (endpoint) {
     } catch {}
   }
   return null
+}
+
+export function ghAsync (endpoint) {
+  const token = ghToken()
+  if (!token) return Promise.resolve(null)
+  return new Promise(resolve => {
+    execFile('gh', ['api', endpoint], {
+      encoding: 'utf8',
+      maxBuffer: 32 * 1024 * 1024,
+      timeout: 60000,
+      env: { ...process.env, GH_TOKEN: token, GITHUB_TOKEN: token }
+    }, (err, stdout) => {
+      if (err && !stdout) return resolve(null)
+      try { resolve(JSON.parse(stdout)) } catch { resolve(null) }
+    })
+  })
+}
+
+export async function pooled (items, limit, fn) {
+  const results = new Array(items.length)
+  let next = 0
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (next < items.length) {
+      const i = next++
+      results[i] = await fn(items[i], i)
+    }
+  })
+  await Promise.all(workers)
+  return results
 }
 
 export function istStamp (d = new Date()) {

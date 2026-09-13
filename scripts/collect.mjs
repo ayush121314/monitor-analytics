@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import path from 'node:path'
-import { loadConfig, loadState, saveState, git, gitOk, gh, toIst, expand } from './lib.mjs'
+import { loadConfig, loadState, saveState, git, gitOk, gh, ghAsync, pooled, toIst, expand } from './lib.mjs'
 
 function parseArgs (argv) {
   const out = { repos: [], limit: 40, fetch: true, status: false, since: null }
@@ -108,27 +108,39 @@ function signalsOf (repoPath, sha, base, files) {
   }
 }
 
-function deployTimeline (cfg, repo, state, windowStartIso) {
+async function deployTimeline (cfg, repo, state, windowStartIso) {
   const cache = state.deploys[repo.name] || (state.deploys[repo.name] = {})
-  const runs = gh(`repos/${cfg.org}/${repo.name}/actions/workflows/${repo.workflow}/runs?per_page=40&branch=${repo.branch}`)
+  const runs = await ghAsync(`repos/${cfg.org}/${repo.name}/actions/workflows/${repo.workflow}/runs?per_page=40&branch=${repo.branch}`)
   if (!runs || !runs.workflow_runs) return { available: false, deploys: [] }
+
+  const list = runs.workflow_runs
+  const cutoff = windowStartIso ? new Date(windowStartIso) : null
+  const needed = []
+  let cachedHits = 0
+  for (const run of list) {
+    const known = cache[String(run.id)] !== undefined
+    if (known && cache[String(run.id)]) cachedHits++
+    if (!known) needed.push(run)
+    const older = cutoff && new Date(run.created_at) < cutoff
+    if (older && (cachedHits >= 2 || !cutoff)) break
+    if (!cutoff && cachedHits >= 1 && !needed.length) break
+  }
+
+  await pooled(needed, 8, async run => {
+    const jobs = await ghAsync(`repos/${cfg.org}/${repo.name}/actions/runs/${run.id}/jobs`)
+    let value = null
+    if (jobs && jobs.jobs) {
+      const prod = jobs.jobs.find(j => j.name.endsWith(repo.prodJob) && j.conclusion === 'success')
+      value = prod ? prod.completed_at : (run.status === 'completed' ? false : null)
+    }
+    if (value !== null) cache[String(run.id)] = value
+  })
+
   const deploys = []
   let found = 0
-  for (const run of runs.workflow_runs) {
-    const key = String(run.id)
-    let value = cache[key]
-    if (value === undefined) {
-      const jobs = gh(`repos/${cfg.org}/${repo.name}/actions/runs/${run.id}/jobs`)
-      if (!jobs || !jobs.jobs) { value = null } else {
-        const prod = jobs.jobs.find(j => j.name.endsWith(repo.prodJob) && j.conclusion === 'success')
-        value = prod ? prod.completed_at : (run.status === 'completed' ? false : null)
-      }
-      if (value !== null) cache[key] = value
-    }
-    if (value) {
-      deploys.push({ sha: run.head_sha, at: value, runId: run.id })
-      found++
-    }
+  for (const run of list) {
+    const value = cache[String(run.id)]
+    if (value) { deploys.push({ sha: run.head_sha, at: value, runId: run.id }); found++ }
     if (!windowStartIso && found >= 1) break
     const olderThanWindow = windowStartIso && new Date(run.created_at) < new Date(windowStartIso)
     if (found >= 2 && olderThanWindow) break
@@ -147,7 +159,7 @@ function liveInfo (repoPath, sha, deploys) {
   return { live: false, liveSince: null, liveSinceIst: null, viaSha: null }
 }
 
-function collectRepo (cfg, state, repo, args) {
+async function collectRepo (cfg, state, repo, args) {
   const result = { name: repo.name, path: repo.path, lokiApp: repo.lokiApp, ok: true }
   if (!gitOk(repo.path, ['rev-parse', '--git-dir'])) {
     return { ...result, ok: false, error: 'repo path is not a git checkout' }
@@ -182,7 +194,7 @@ function collectRepo (cfg, state, repo, args) {
   const raw = git(repo.path, ['log', '--first-parent', '--reverse', `${since}..${ref}`, '--format=%H%x1f%cI%x1f%an%x1f%s'], { soft: true })
   const rows = raw ? raw.split('\n').filter(Boolean) : []
   const windowStart = rows.length ? rows[0].split('\x1f')[1] : null
-  const timeline = deployTimeline(cfg, repo, state, windowStart)
+  const timeline = await deployTimeline(cfg, repo, state, windowStart)
 
   const changes = rows.slice(-args.limit).map(row => {
     const [sha, date, author, subject] = row.split('\x1f')
@@ -263,17 +275,19 @@ if (args.status) {
 const wanted = args.repos.length ? cfg.repos.filter(r => args.repos.includes(r.name)) : cfg.repos
 const out = { generatedAt: new Date().toISOString(), generatedAtIst: toIst(new Date().toISOString()), repos: [] }
 let graphStale = false
-for (const repo of wanted) {
+const collected = await Promise.all(wanted.map(async repo => {
   try {
-    const res = collectRepo(cfg, state, repo, args)
-    if (res.ok && res.totalPending > 0 && cfg.graph?.refreshOnNewCommits) {
-      res.graphNote = refreshGraph(repo)
-      if (res.graphNote === 'graph rebuilt') graphStale = true
-    }
-    out.repos.push(res)
+    return await collectRepo(cfg, state, repo, args)
   } catch (e) {
-    out.repos.push({ name: repo.name, ok: false, error: String(e.message).slice(0, 400) })
+    return { name: repo.name, ok: false, error: String(e.message).slice(0, 400) }
   }
+}))
+for (const [i, res] of collected.entries()) {
+  if (res.ok && res.totalPending > 0 && cfg.graph?.refreshOnNewCommits) {
+    res.graphNote = refreshGraph(wanted[i])
+    if (res.graphNote === 'graph rebuilt') graphStale = true
+  }
+  out.repos.push(res)
 }
 if (graphStale) out.mergedGraph = remergeGraph(cfg)
 else out.mergedGraph = expand(cfg.graph?.merged) || null
