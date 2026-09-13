@@ -430,6 +430,33 @@ out.verdict = notApplied.length
   : 'every live migration is reflected in prod'
 out.migrations = out.migrations.filter(m => m.missing.length)
 
+async function populationCheck (db, schema, pairs) {
+  const results = []
+  for (const { table, column } of pairs.slice(0, 12)) {
+    const cols = schema.tables[table]
+    if (!cols || !Object.prototype.hasOwnProperty.call(cols, column)) continue
+    const dateCol = ['created_at', 'createdAt', 'updated_at', 'updatedAt'].find(c => Object.prototype.hasOwnProperty.call(cols, c))
+    const where = dateCol ? `WHERE \`${dateCol}\` >= NOW() - INTERVAL 7 DAY` : ''
+    const r = await query(db, `SELECT COUNT(*) rows_seen, COUNT(\`${column}\`) filled FROM \`${table}\` ${where}`)
+    if (r.error || !r.rows?.length) continue
+    const rows = Number(r.rows[0].rows_seen || 0)
+    const filled = Number(r.rows[0].filled || 0)
+    const pct = rows ? Math.round(filled / rows * 100) : null
+    results.push({
+      column: `${table}.${column}`,
+      window: dateCol ? `last 7 days by ${dateCol}` : 'whole table',
+      rows,
+      filled,
+      filledPct: pct,
+      verdict: !rows ? 'no rows in the window — cannot tell'
+        : filled === 0 ? 'CRITICAL — the column exists but nothing has written a single value; the feature is not actually storing anything'
+          : pct < 5 ? 'WATCH — almost never written; check whether that matches the gate it sits behind'
+            : 'fine — the column is being populated'
+    })
+  }
+  return results
+}
+
 out.codeExpectsMissing = []
 for (const repo of repos) {
   try {
@@ -438,6 +465,39 @@ for (const repo of repos) {
     }
   } catch {}
 }
+
+const writtenPairs = []
+for (const repo of repos) {
+  try {
+    const diffRange = args.since ? `${args.since}..origin/${repo.branch}` : `origin/${repo.branch}~10..origin/${repo.branch}`
+    const added = git(repo.path, ['diff', '-U0', diffRange]).split('\n')
+      .filter(l => l.startsWith('+') && !l.startsWith('+++')).map(l => l.slice(1)).join('\n')
+    for (const m of added.matchAll(/INSERT\s+INTO\s+`?(\w+)`?\s*\(([^)]{3,600})\)/gi)) {
+      for (const raw of m[2].split(',')) {
+        const col = raw.replace(/[`\s]/g, '')
+        if (/^[a-z_][a-z0-9_]*$/i.test(col)) writtenPairs.push({ table: m[1], column: col })
+      }
+    }
+    for (const m of added.matchAll(/UPDATE\s+`?(\w+)`?\s+SET\s+([^;]{3,400})/gi)) {
+      for (const part of m[2].split(',')) {
+        const c = part.match(/^\s*`?([a-z_][a-z0-9_]*)`?\s*=/i)
+        if (c) writtenPairs.push({ table: m[1], column: c[1] })
+      }
+    }
+  } catch {}
+}
+const seenPair = new Set()
+const uniquePairs = writtenPairs.filter(p => {
+  const k = `${p.table}.${p.column}`
+  if (seenPair.has(k)) return false
+  seenPair.add(k); return true
+})
+out.populationChecks = uniquePairs.length ? await populationCheck(db, now, uniquePairs) : []
+out.populationVerdict = out.populationChecks.length
+  ? (out.populationChecks.some(c => c.filled === 0 && c.rows > 0)
+      ? 'a column this window writes to is still completely empty in prod'
+      : 'every column this window writes to is being populated')
+  : 'this window writes to no new columns'
 
 if (!args.skipErrors) {
   out.dbErrorsInProd = await lokiDbErrors(args.from || 'now-24h')

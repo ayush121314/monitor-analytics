@@ -85,6 +85,7 @@ For the database lens, put a read-only account in `<dataDir>/db.json` (`{host, u
 | `grafana.mjs` | prod Loki queries by module / level / text, lines or counts |
 | `crashscan.mjs` | greps prod for crash-shaped errors across every app, all patterns in parallel |
 | `prodhealth.mjs` | read-only prod SQL: seven-day series for orders, deliveries, returns, refunds, plus stuck-work counts |
+| `logsweep.mjs` | every log level, not just error: failures logged as warn or info, and modules that stopped logging |
 | `schemadrift.mjs` | prod DDL snapshot + diff against the last one, and every repo migration checked against what prod actually has |
 | `bucketab.mjs` | bucket-gated features compared against every other bucket, per-user rates with a z test |
 | `monitor.mjs` | the five-minute self-heal pass |

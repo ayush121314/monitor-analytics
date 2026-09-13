@@ -230,9 +230,30 @@ Every run is written to `<dataDir>/runs/<id>.{log,json,meta.json}`. The meta fil
 
 The **Controls** tab drives everything else: pick which repos a run covers, override the start point, add a note to the AI, mark it a dry run, move or clear a repo's checkpoint (with a commit picker), and fire ad-hoc Loki probes against prod.
 
-## Parallelism
+## Four agents, one per lens
 
-More than ~6 changes to analyze: dispatch one subagent per change (or per repo) with the change's JSON slice plus this file's Step 3–4, and have each return a finished markdown block + verdict. Merge the blocks in PR order. Keep the Amplitude MCP calls in the main session if subagents cannot reach it.
+A run fans out into **four subagents that work at the same time**, because the four kinds of evidence are independent and each is slow on its own. Dispatch all four in a single message, then merge what they return.
+
+| Agent | Owns | Runs |
+|---|---|---|
+| **db** | schema and data | `schemadrift.mjs --snapshot --since <sha>` (stage-vs-prod, what was never applied, whether new columns are actually being filled), `prodhealth.mjs` (7-day funnel + stuck work), `bucketab.mjs` for any bucket-gated feature |
+| **logs** | everything Loki knows | `logsweep.mjs` (all levels, not just error — failures logged as warn/info, modules that went quiet), `crashscan.mjs`, per-module probes for the changed files |
+| **code** | the diff itself | `predeploy.mjs --since <sha>`, reading each change against its PR title, checking the new path is reachable (gate, bucket, version), and whether a fix is one line or a rewrite |
+| **amplitude** | events | for each changed event or property: is it arriving, on what share of traffic, since when — and the load-bearing events against their own 7-day shape |
+
+Give each agent: the collect JSON for the window, the paths in `config.json`, and this instruction —
+
+> Return **only** JSON: `{"points": [{"section": "features"|"health", "severity": "...", "title": "...", "explain": "...", "proof": ["..."]}], "actions": [{"severity": "...", "what": "...", "who": "..."}]}`. `title` is one plain line, `explain` is three or four sentences a non-engineer understands, `proof` holds the queries and counts. Never guess: if a probe cannot settle something, say so in `explain` and mark it `watch`. Do not touch git, do not write to prod.
+
+Then you do three things only:
+
+1. **Merge** — collect every `points` entry into the two sections by its `section` field, and every `actions` entry into the Conclusion. Drop duplicates where two agents found the same thing, keeping the one with better proof.
+2. **Judge across lenses** — this is the part no single agent can do. The database says a column is empty, the logs say its module is silent and Amplitude says the event never fired: that is one finding, not three. A log error whose module the code agent says is unreachable is not a finding at all. Contradictions between agents are the most valuable thing on the page — chase them before publishing.
+3. **Write the report** — the shape in Step 5, nothing more.
+
+Section 1 comes from the `features` points, section 2 from the `health` points. Both sections get evidence from all four agents; an agent is a source, not a section.
+
+If the window has no new commits, dispatch only **db**, **logs** and **amplitude** in health mode — there is no diff for the code agent to read.
 
 ## Traps (learned the hard way)
 
