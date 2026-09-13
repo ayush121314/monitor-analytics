@@ -65,6 +65,38 @@ function git (repoPath, gitArgs) {
   }
 }
 
+function usedInCode (identifier) {
+  const hits = []
+  for (const repo of cfg.repos) {
+    const src = path.join(repo.path, 'src')
+    if (!existsSync(src)) continue
+    let out = ''
+    try {
+      out = execFileSync('grep', ['-rl', '--include=*.js', '--include=*.mjs', '-w', identifier, src],
+        { encoding: 'utf8', timeout: 20000, stdio: ['ignore', 'pipe', 'ignore'] })
+    } catch { out = '' }
+    for (const f of out.trim().split('\n').filter(Boolean).slice(0, 3)) {
+      hits.push(`${repo.name}:${path.relative(repo.path, f)}`)
+    }
+  }
+  return hits
+}
+
+function classifyStageOnly (kind, name, identifier) {
+  const files = usedInCode(identifier)
+  return {
+    kind,
+    what: name,
+    usedInCode: files.length > 0,
+    where: files,
+    verdict: files.length
+      ? (kind === 'index'
+          ? 'IMPORTANT — code queries this table, so prod is running those queries without the index'
+          : 'CRITICAL — code references this and prod does not have it')
+      : 'not an issue right now — nothing in the three repos references it'
+  }
+}
+
 function sqlIdentifiersFromDiff (repo, since, schema) {
   const range = since ? `${since}..origin/${repo.branch}` : `origin/${repo.branch}~10..origin/${repo.branch}`
   const diff = git(repo.path, ['diff', '-U0', range])
@@ -428,7 +460,32 @@ if (!args.skipStage) {
       out.stage = { error: stageSchema.error }
     } else {
       const d = diffSchemas(now, stageSchema)
+      const judged = [
+        ...d.newTables.map(t => classifyStageOnly('table', t, t)),
+        ...d.newColumns.map(c => classifyStageOnly('column', `${c.table}.${c.column} ${c.type}`, c.column)),
+        ...d.newIndexes
+          .filter(i => i.index !== 'PRIMARY')
+          .map(i => classifyStageOnly('index', `${i.table}.${i.index} (${i.cols})`, i.table))
+      ]
+      const mismatches = d.changedColumns.map(c => {
+        const files = usedInCode(c.column)
+        return {
+          what: `${c.table}.${c.column}`,
+          prod: c.was,
+          stage: c.now,
+          usedInCode: files.length > 0,
+          where: files,
+          verdict: files.length && /varchar\((\d+)\)/.test(c.was) && /varchar\((\d+)\)/.test(c.now) &&
+            Number(c.was.match(/varchar\((\d+)\)/)[1]) < Number(c.now.match(/varchar\((\d+)\)/)[1])
+            ? 'IMPORTANT — prod is narrower than stage, so a value that passes testing can truncate in prod'
+            : files.length ? 'WATCH — type differs and code touches this column' : 'not an issue right now — nothing references it'
+        }
+      })
       out.stage = {
+        judged,
+        realIssues: judged.filter(j => j.usedInCode),
+        notAnIssue: judged.filter(j => !j.usedInCode).map(j => j.what),
+        typeMismatchJudged: mismatches,
         host: stage.host.split('.')[0],
         database: stage.database,
         source: stage.from ? path.basename(stage.from) : 'db.json',
@@ -445,9 +502,12 @@ if (!args.skipStage) {
         },
         typeMismatch: d.changedColumns.map(c => `${c.table}.${c.column}: prod ${c.was} vs stage ${c.now}`)
       }
-      const n = out.stage.onStageNotInProd.columns.length + out.stage.onStageNotInProd.tables.length
-      out.stage.verdict = n
-        ? `${n} object(s) exist on stage but not in prod — tested there, never applied here`
+      const real = out.stage.realIssues.length
+      const total = out.stage.judged.length
+      out.stage.verdict = total
+        ? (real
+            ? `${real} of ${total} stage-only object(s) are actually used by the code — those are the issues; the rest are noise`
+            : `${total} object(s) exist only on stage, but nothing in the code references any of them — not an issue right now`)
         : 'stage and prod agree on every table and column'
     }
   }

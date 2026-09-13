@@ -67,6 +67,18 @@ Per change you get: `sha`, `pr`, `branch`, `kind`, `subject`, `files`, `stat`, `
 
 `live: false` means **the prod deploy job never succeeded for that commit** (usually still waiting for approval). `liveSince` is the exact prod deploy timestamp — use it as the lower bound for every prod probe. Never probe prod for a window before `liveSince`.
 
+## Section 2 is already running while you write section 1
+
+The dashboard fires `crashscan.mjs`, `prodhealth.mjs` and `schemadrift.mjs` in the background the moment a run starts, so their output is usually sitting there before you finish the features. Read `<dataDir>/health-cache/{crashscan,prodhealth,schemadrift}.json` rather than running them again; each has a `.meta.json` beside it with the command and when it finished. Re-run a script yourself only if its file is missing, older than the run, or you need a different window.
+
+When you do run probes by hand, run independent ones together rather than one after another:
+
+```
+( node scripts/grafana.mjs --repo ecommerce-backend --module X --from now-24h > /tmp/a.json & \
+  node scripts/grafana.mjs --repo ecom-cron-worker --level error --from now-24h > /tmp/b.json & \
+  wait )
+```
+
 ## Pace
 
 Keep a run proportional to what landed: roughly **2–4 probes per change**, and section 1 published within ~10 minutes of starting. Depth is for the changes that can actually hurt — money, orders, events, migrations, gates. A one-file copy change gets one probe and one line. When a probe needs more than two follow-ups to settle, stop and write `🟡 could not prove — <what would settle it>`; an honest unknown beats a long chase. **Answer at the coarsest resolution that settles the question** — daily counts before hourly, one query before a timeline. Pinning an exact recovery minute is almost never worth the round-trips; "back to normal on 9-Sep, was zero on 8-Sep" is the finding. Section 2's crashscan is one command — run it once, across all repos, and read the output rather than re-querying each pattern by hand.
