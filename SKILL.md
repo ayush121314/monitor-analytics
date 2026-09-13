@@ -239,7 +239,31 @@ A run fans out into **four subagents that work at the same time**, because the f
 | **db** | schema and data | `schemadrift.mjs --snapshot --since <sha>` (stage-vs-prod, what was never applied, whether new columns are actually being filled), `prodhealth.mjs` (7-day funnel + stuck work), `bucketab.mjs` for any bucket-gated feature |
 | **logs** | everything Loki knows | `logsweep.mjs` (all levels, not just error — failures logged as warn/info, modules that went quiet), `crashscan.mjs`, per-module probes for the changed files |
 | **code** | the diff itself | `predeploy.mjs --since <sha>`, reading each change against its PR title, checking the new path is reachable (gate, bucket, version), and whether a fix is one line or a rewrite |
-| **amplitude** | events | for each changed event or property: is it arriving, on what share of traffic, since when — and the load-bearing events against their own 7-day shape |
+| **amplitude** | events | two jobs, both required — see below |
+
+### What the amplitude agent must do
+
+It has **two jobs, and both go in every report**:
+
+1. **The new feature's own events** — for each event or property this window added or changed: is it arriving, from which minute, and on what share of traffic. Then how it is *performing*: daily volume since the deploy against the week before, and the split across the new property's values. This is the only place the report can say "the feature is live and people are actually hitting it" rather than "the code deployed".
+2. **Sanity on the events that were already there** — the load-bearing ones (`order_placed`, `payment_success`, `order_kept`, `delivered`, `return_received`, `rto`, `order_cancelled`) against their own 7-day shape. An event that flatlines means an emitter broke while every service still looks healthy; cross-check any drop against the database count for the same day — database high and Amplitude low is a broken emitter, both low is a real business drop.
+
+**Keep `<dataDir>/amplitude-charts.json` current.** It holds the project's real event spellings (snake_case, never Title Case), the chart definitions the audit already uses, the `chartEditId` of anything it has built, and what each property's coverage was last time. Read it before querying so you reuse a definition instead of inventing one, and append whatever you build — the next run starts where this one finished.
+
+**Attach the chart to the point.** When a point is about a new event or property, put the series on it so the dashboard draws it inline and nobody has to go looking:
+
+```json
+{ "severity": "working", "title": "orderPlacedCount har order event par ja raha hai",
+  "explain": "…",
+  "chart": { "title": "order_placed by orderPlacedCount",
+             "labels": ["09-Sep","10-Sep","11-Sep","12-Sep"],
+             "series": [{ "name": "with value", "values": [0, 0, 314, 329] },
+                        { "name": "(none)", "values": [597, 584, 405, 0] }],
+             "link": "https://app.amplitude.com/analytics/…" },
+  "proof": ["Amplitude 760327, order_placed grouped by orderPlacedCount, last 4 days"] }
+```
+
+Only new-feature points carry a chart. Health points stay text — the report is for scanning, not a dashboard.
 
 Give each agent: the collect JSON for the window, the paths in `config.json`, and this instruction —
 

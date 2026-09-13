@@ -199,6 +199,12 @@
   .act:first-child { border-top:0; }
   .act .ad { flex:1; min-width:0; font-size:13.5px; line-height:1.5; }
   .act .who { color:var(--accent); font-weight:600; }
+  .chart { margin:10px 0 4px; }
+  .chart .ct { font-size:11.5px; color:var(--muted); margin-bottom:6px; display:flex; gap:8px; align-items:baseline; flex-wrap:wrap; }
+  .chart .ct a { font-size:11px; }
+  .chart svg { display:block; width:100%; height:auto; }
+  .chart .lg { display:flex; gap:12px; flex-wrap:wrap; margin-top:6px; font-size:11px; color:var(--muted); }
+  .chart .lg i { display:inline-block; width:9px; height:9px; border-radius:2px; margin-right:5px; }
   .proof { margin-top:9px; padding-top:8px; border-top:1px dashed var(--line); font-family:var(--mono);
     font-size:11px; color:var(--muted); line-height:1.6; }
   .lens { border-left:2px solid var(--line); padding:2px 0 2px 13px; margin:14px 0; }
@@ -498,6 +504,44 @@ function actionsHtml (actions, index) {
   return `<details class="block" open><summary>${index} · Conclusion${sorted.length ? ` <span class="cnt">${sorted.length}</span>` : ''}</summary><div class="inner">${rows}</div></details>`
 }
 
+const CHART_COLORS = ['#5b9dff', '#3ecf8e', '#f5b544', '#ff6b6b', '#b98cff', '#57d3e0']
+
+function chartHtml (c) {
+  if (!c || !Array.isArray(c.labels) || !c.labels.length) return ''
+  const series = (c.series || []).filter(s => Array.isArray(s.values) && s.values.length)
+  if (!series.length) return ''
+  const W = 520, H = 120, padL = 34, padB = 18, padT = 8
+  const max = Math.max(1, ...series.flatMap(s => s.values.map(v => Number(v) || 0)))
+  const n = c.labels.length
+  const stepX = (W - padL - 8) / Math.max(1, n - 1)
+  const y = v => padT + (H - padT - padB) * (1 - (Number(v) || 0) / max)
+
+  const paths = series.map((s, i) => {
+    const pts = s.values.map((v, j) => `${padL + j * stepX},${y(v)}`).join(' ')
+    const col = CHART_COLORS[i % CHART_COLORS.length]
+    const dots = s.values.map((v, j) => `<circle cx="${padL + j * stepX}" cy="${y(v)}" r="2.5" fill="${col}"/>`).join('')
+    return `<polyline points="${pts}" fill="none" stroke="${col}" stroke-width="2"/>${dots}`
+  }).join('')
+
+  const ticks = [0, max].map(v => `<text x="2" y="${y(v) + 3}" fill="#8d97a8" font-size="9">${v >= 1000 ? Math.round(v / 1000) + 'k' : v}</text>
+    <line x1="${padL - 4}" y1="${y(v)}" x2="${W - 4}" y2="${y(v)}" stroke="#262c36" stroke-width="1"/>`).join('')
+
+  const labels = c.labels.map((l, j) => {
+    if (n > 8 && j % 2) return ''
+    return `<text x="${padL + j * stepX}" y="${H - 4}" fill="#8d97a8" font-size="9" text-anchor="middle">${esc(String(l).slice(0, 6))}</text>`
+  }).join('')
+
+  const legend = series.length > 1
+    ? `<div class="lg">${series.map((s, i) => `<span><i style="background:${CHART_COLORS[i % CHART_COLORS.length]}"></i>${esc(s.name || 'series ' + (i + 1))}</span>`).join('')}</div>`
+    : ''
+
+  return `<div class="chart">
+    <div class="ct">${esc(c.title || 'Amplitude')}${c.link ? ` · <a href="${esc(c.link)}" target="_blank" rel="noreferrer">open in Amplitude</a>` : ''}</div>
+    <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">${ticks}${paths}${labels}</svg>
+    ${legend}
+  </div>`
+}
+
 function renderReportJson (d) {
   const html = []
   if (d.bottomLine) html.push(`<div class="bottom">${inline(d.bottomLine)}</div>`)
@@ -514,7 +558,7 @@ function renderReportJson (d) {
       n++
       html.push(`<details class="finding ${s.c}" id="p${n}" data-v="${s.c}">
         <summary><span class="sev">${s.t}</span><span class="ft">${inline(pt.title)}</span></summary>
-        <div class="fb">${String(pt.explain || '').split('\n').filter(Boolean).map(l => `<p>${inline(l)}</p>`).join('')}${pt.proof?.length ? `<div class="proof">${pt.proof.map(x => `<div>${inline(x)}</div>`).join('')}</div>` : ''}</div>
+        <div class="fb">${String(pt.explain || '').split('\n').filter(Boolean).map(l => `<p>${inline(l)}</p>`).join('')}${chartHtml(pt.chart)}${pt.proof?.length ? `<div class="proof">${pt.proof.map(x => `<div>${inline(x)}</div>`).join('')}</div>` : ''}</div>
       </details>`)
     }
     html.push('</div></details>')

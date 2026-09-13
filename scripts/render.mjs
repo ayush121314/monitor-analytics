@@ -148,6 +148,17 @@ export function toMarkdown (data) {
         md.push('')
         md.push(String(pt.explain || '').trim())
         md.push('')
+        if (pt.chart?.labels?.length) {
+          const c = pt.chart
+          md.push(`_${c.title || 'Amplitude'}_${c.link ? ` — [open in Amplitude](${c.link})` : ''}`)
+          md.push('')
+          md.push('| day | ' + (c.series || []).map(x => x.name || 'series').join(' | ') + ' |')
+          md.push('|---|' + (c.series || []).map(() => '---').join('|') + '|')
+          c.labels.forEach((l, i) => {
+            md.push(`| ${l} | ` + (c.series || []).map(x => x.values?.[i] ?? '').join(' | ') + ' |')
+          })
+          md.push('')
+        }
         if (pt.proof?.length) {
           md.push(...pt.proof.map(x => `_${x}_`))
           md.push('')

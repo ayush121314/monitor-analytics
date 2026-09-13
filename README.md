@@ -56,6 +56,7 @@ The layers below run by themselves because they cost nothing: git reads and prod
 | `<dataDir>/STATUS.md` | **what is broken right now** — rewritten by every run: open items, how far each repo is checked, what the last run cost, whether the tool is healthy |
 | `<dataDir>/FINDINGS.md` | append-only report log, newest run at the bottom |
 | `<dataDir>/PREFERENCES.md` | standing instructions honoured by every run |
+| `<dataDir>/amplitude-charts.json` | the project's real event names, the chart definitions the audit reuses, and what each property's coverage was last time |
 | `<dataDir>/runs/` | per-run log, collected evidence, and metadata (tokens, cost) |
 | `<dataDir>/discussions/` | per-report chat threads |
 
