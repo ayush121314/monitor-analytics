@@ -1,11 +1,39 @@
-import { execFile } from 'node:child_process'
+import { execFile, execFileSync } from 'node:child_process'
 import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync } from 'node:fs'
 import path from 'node:path'
-import { loadConfig, istStamp } from './lib.mjs'
+import { pathToFileURL } from 'node:url'
+import { loadConfig, istStamp, SKILL_DIR } from './lib.mjs'
 
 const cfg = loadConfig()
 const snapDir = path.join(cfg.dataDir, 'schema')
 mkdirSync(snapDir, { recursive: true })
+
+function envShValue (file, name) {
+  if (!existsSync(file)) return null
+  const m = readFileSync(file, 'utf8').match(new RegExp(`^export\\s+${name}=["']?([^"'\\n]+)`, 'm'))
+  return m ? m[1].trim() : null
+}
+
+function stageConfig () {
+  const p = path.join(cfg.dataDir, 'db.json')
+  if (existsSync(p)) {
+    try {
+      const j = JSON.parse(readFileSync(p, 'utf8'))
+      if (j.stage?.host && j.stage?.user) return j.stage
+    } catch {}
+  }
+  for (const repo of cfg.repos) {
+    for (const name of ['env.sh', '.env.sh']) {
+      const file = path.join(repo.path.replace(/-3$/, ''), name)
+      const host = envShValue(file, 'MASTER_DB_HOST_RO')
+      const user = envShValue(file, 'MASTER_DB_USERNAME_RO')
+      const password = envShValue(file, 'MASTER_DB_PASSWORD_RO')
+      const database = envShValue(file, 'MASTER_DATABASE')
+      if (host && user && password) return { host, user, password, database: database || 'ecommerce_stage', from: file }
+    }
+  }
+  return null
+}
 
 function dbConfig () {
   const p = path.join(cfg.dataDir, 'db.json')
@@ -21,11 +49,155 @@ function parseArgs (argv) {
     if (argv[i] === '--snapshot') out.snapshot = true
     else if (argv[i] === '--repo') out.repo = argv[++i]
     else if (argv[i] === '--against') out.against = argv[++i]
+    else if (argv[i] === '--since') out.since = argv[++i]
+    else if (argv[i] === '--from') out.from = argv[++i]
+    else if (argv[i] === '--skip-errors') out.skipErrors = true
+    else if (argv[i] === '--skip-stage') out.skipStage = true
   }
   return out
 }
 
-function query (db, sql) {
+function git (repoPath, gitArgs) {
+  try {
+    return execFileSync('git', ['-C', repoPath, ...gitArgs], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, stdio: ['ignore', 'pipe', 'ignore'] })
+  } catch {
+    return ''
+  }
+}
+
+function sqlIdentifiersFromDiff (repo, since, schema) {
+  const range = since ? `${since}..origin/${repo.branch}` : `origin/${repo.branch}~10..origin/${repo.branch}`
+  const diff = git(repo.path, ['diff', '-U0', range])
+  const added = diff.split('\n').filter(l => l.startsWith('+') && !l.startsWith('+++')).map(l => l.slice(1)).join('\n')
+  if (!added.trim()) return []
+
+  const tables = Object.keys(schema.tables)
+  const tableSet = new Set(tables)
+  const findings = []
+  const seen = new Set()
+  const note = (table, column, how, sample) => {
+    const key = `${table}.${column}`
+    if (seen.has(key)) return
+    seen.add(key)
+    if (!tableSet.has(table)) return
+    if (Object.prototype.hasOwnProperty.call(schema.tables[table], column)) return
+    findings.push({ table, column, how, sample: sample.trim().slice(0, 160) })
+  }
+
+  for (const m of added.matchAll(/INSERT\s+INTO\s+`?(\w+)`?\s*\(([^)]{3,600})\)/gi)) {
+    const table = m[1]
+    for (const raw of m[2].split(',')) {
+      const col = raw.replace(/[`\s]/g, '')
+      if (/^[a-z_][a-z0-9_]*$/i.test(col)) note(table, col, 'INSERT column list', m[0])
+    }
+  }
+
+  for (const m of added.matchAll(/UPDATE\s+`?(\w+)`?\s+SET\s+([^;]{3,400})/gi)) {
+    const table = m[1]
+    for (const part of m[2].split(',')) {
+      const c = part.match(/^\s*`?([a-z_][a-z0-9_]*)`?\s*=/i)
+      if (c) note(table, c[1], 'UPDATE SET', m[0])
+    }
+  }
+
+  const JS_MEMBERS = new Set(['startsWith', 'endsWith', 'includes', 'length', 'map', 'filter', 'find', 'push', 'join', 'split', 'slice', 'trim', 'toString', 'replace', 'then', 'catch', 'forEach', 'reduce', 'some', 'every', 'match', 'test', 'toFixed', 'concat', 'keys', 'values', 'entries', 'indexOf', 'sort', 'flat', 'id', 'name', 'value', 'data', 'rows', 'body', 'query', 'params'])
+  const SQLISH = /\b(SELECT|FROM|JOIN|WHERE|GROUP\s+BY|ORDER\s+BY|INSERT\s+INTO|UPDATE|SET|VALUES|ON\s+DUPLICATE)\b/i
+
+  for (const line of added.split('\n')) {
+    if (!SQLISH.test(line)) continue
+    const aliasMap = {}
+    for (const m of line.matchAll(/\b(?:FROM|JOIN)\s+`?(\w+)`?(?:\s+(?:AS\s+)?`?([a-z][a-z0-9_]*)`?)?/gi)) {
+      if (!tableSet.has(m[1])) continue
+      aliasMap[m[1]] = m[1]
+      if (m[2] && !/^(on|where|set|values|as|left|right|inner|outer|join|group|order|limit|using)$/i.test(m[2])) aliasMap[m[2]] = m[1]
+    }
+    if (!Object.keys(aliasMap).length) continue
+    for (const m of line.matchAll(/\b([a-z][a-z0-9_]*)\.`?([a-z_][a-z0-9_]*)`?/gi)) {
+      const table = aliasMap[m[1]]
+      if (!table) continue
+      if (JS_MEMBERS.has(m[2])) continue
+      if (/\.\w+\s*\(/.test(m[0] + line.slice(line.indexOf(m[0]) + m[0].length, line.indexOf(m[0]) + m[0].length + 1))) continue
+      note(table, m[2], 'qualified reference in SQL', line)
+    }
+  }
+
+  return findings
+}
+
+function lokiDbErrors (from) {
+  const patterns = [
+    { key: 'Unknown column', why: 'a query references a column prod does not have' },
+    { key: "doesn't exist", why: 'a query references a table prod does not have' },
+    { key: 'ER_BAD_FIELD_ERROR', why: 'MySQL rejected an unknown column' },
+    { key: 'ER_NO_SUCH_TABLE', why: 'MySQL rejected an unknown table' },
+    { key: 'ER_PARSE_ERROR', why: 'malformed SQL reached prod' },
+    { key: 'ER_WRONG_VALUE', why: 'a value did not fit the column type' },
+    { key: 'Data truncated', why: 'a value did not fit the column type' },
+    { key: 'Incorrect integer value', why: 'a value did not fit the column type' }
+  ]
+  const grafana = path.join(SKILL_DIR, 'scripts', 'grafana.mjs')
+  const jobs = []
+  for (const repo of cfg.repos) {
+    for (const p of patterns) {
+      jobs.push(new Promise(resolve => {
+        execFile(process.execPath, [grafana, '--repo', repo.name, '--grep', p.key, '--from', from, '--limit', '20'],
+          { timeout: 60000, maxBuffer: 16 * 1024 * 1024 }, (err, stdout) => {
+            if (err && !stdout) return resolve(null)
+            try {
+              const r = JSON.parse(stdout)
+              if (!r || r.error || !r.lineCount) return resolve(null)
+              resolve({
+                app: repo.name,
+                pattern: p.key,
+                why: p.why,
+                lines: r.lineCount,
+                modules: r.modules || {},
+                samples: (r.samples || []).slice(0, 2).map(x => ({ at: x.at, module: x.module, msg: x.msg, err: typeof x.err === 'string' ? x.err.slice(0, 200) : (x.err?.message || null) }))
+              })
+            } catch { resolve(null) }
+          })
+      }))
+    }
+  }
+  return Promise.all(jobs).then(rs => rs.filter(Boolean))
+}
+
+let mysql2 = null
+async function loadDriver () {
+  if (mysql2 !== null) return mysql2
+  for (const repo of cfg.repos) {
+    for (const base of [repo.path, repo.path.replace(/-3$/, '')]) {
+      const file = path.join(base, 'node_modules', 'mysql2', 'promise.js')
+      if (!existsSync(file)) continue
+      try {
+        mysql2 = await import(pathToFileURL(file).href)
+        return mysql2
+      } catch {}
+    }
+  }
+  mysql2 = false
+  return mysql2
+}
+
+async function queryDriver (db, sql) {
+  const driver = await loadDriver()
+  if (!driver) return null
+  let conn
+  try {
+    conn = await driver.createConnection({
+      host: db.host, user: db.user, password: db.password, database: db.database || 'ecommerce',
+      port: Number(db.port || 3306), connectTimeout: 20000
+    })
+    const [rows] = await conn.query(sql)
+    return { rows: rows.map(r => Object.fromEntries(Object.entries(r).map(([k, v]) => [k, v === null ? '' : String(v)]))) }
+  } catch (e) {
+    return { error: String(e.message).slice(0, 300) }
+  } finally {
+    if (conn) { try { await conn.end() } catch {} }
+  }
+}
+
+function queryCli (db, sql) {
   return new Promise(resolve => {
     execFile('mysql', ['-h', db.host, '-u', db.user, `-p${db.password}`, db.database || 'ecommerce', '--batch', '--raw', '-e', sql],
       { timeout: 180000, maxBuffer: 64 * 1024 * 1024 }, (err, stdout, stderr) => {
@@ -36,6 +208,14 @@ function query (db, sql) {
         resolve({ rows: lines.slice(1).map(l => { const v = l.split('\t'); return Object.fromEntries(cols.map((c, i) => [c, v[i]])) }) })
       })
   })
+}
+
+async function query (db, sql) {
+  const viaDriver = await queryDriver(db, sql)
+  if (viaDriver && !viaDriver.error) return viaDriver
+  const viaCli = await queryCli(db, sql)
+  if (viaCli && !viaCli.error) return viaCli
+  return viaDriver || viaCli
 }
 
 async function readProd (db) {
@@ -217,6 +397,61 @@ out.verdict = notApplied.length
   ? `${notApplied.length} migration file(s) expect something prod does not have — code touching those columns will fail`
   : 'every live migration is reflected in prod'
 out.migrations = out.migrations.filter(m => m.missing.length)
+
+out.codeExpectsMissing = []
+for (const repo of repos) {
+  try {
+    for (const f of sqlIdentifiersFromDiff(repo, args.since, now)) {
+      out.codeExpectsMissing.push({ repo: repo.name, ...f })
+    }
+  } catch {}
+}
+
+if (!args.skipErrors) {
+  out.dbErrorsInProd = await lokiDbErrors(args.from || 'now-24h')
+}
+
+out.verdictFromCode = out.codeExpectsMissing.length
+  ? `${out.codeExpectsMissing.length} column(s) written or read by new code that prod does not have`
+  : 'no new code references a column prod is missing'
+out.verdictFromErrors = (out.dbErrorsInProd || []).length
+  ? `${out.dbErrorsInProd.length} schema-shaped error pattern(s) firing in prod`
+  : 'prod is not throwing any unknown-column or unknown-table errors'
+
+if (!args.skipStage) {
+  const stage = stageConfig()
+  if (!stage) {
+    out.stage = { error: 'no stage credentials — add a "stage" block to db.json or keep env.sh in the working checkout' }
+  } else {
+    const stageSchema = await readProd(stage)
+    if (stageSchema.error) {
+      out.stage = { error: stageSchema.error }
+    } else {
+      const d = diffSchemas(now, stageSchema)
+      out.stage = {
+        host: stage.host.split('.')[0],
+        database: stage.database,
+        source: stage.from ? path.basename(stage.from) : 'db.json',
+        tables: Object.keys(stageSchema.tables).length,
+        onStageNotInProd: {
+          tables: d.newTables,
+          columns: d.newColumns.map(c => `${c.table}.${c.column} ${c.type}`),
+          indexes: d.newIndexes.map(i => `${i.table}.${i.index} (${i.cols})`)
+        },
+        onProdNotOnStage: {
+          tables: d.droppedTables,
+          columns: d.droppedColumns.map(c => `${c.table}.${c.column}`),
+          indexes: d.droppedIndexes.map(i => `${i.table}.${i.index}`)
+        },
+        typeMismatch: d.changedColumns.map(c => `${c.table}.${c.column}: prod ${c.was} vs stage ${c.now}`)
+      }
+      const n = out.stage.onStageNotInProd.columns.length + out.stage.onStageNotInProd.tables.length
+      out.stage.verdict = n
+        ? `${n} object(s) exist on stage but not in prod — tested there, never applied here`
+        : 'stage and prod agree on every table and column'
+    }
+  }
+}
 
 if (args.snapshot) {
   const file = path.join(snapDir, `prod-${new Date().toISOString().slice(0, 10)}.json`)
