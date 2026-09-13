@@ -263,7 +263,9 @@ It has **two jobs, and both go in every report**:
   "proof": ["Amplitude 760327, order_placed grouped by orderPlacedCount, last 4 days"] }
 ```
 
-Only new-feature points carry a chart. Health points stay text — the report is for scanning, not a dashboard.
+**Only new-feature points carry a chart** — a point in section 1 about an event or property this window shipped or changed. Nothing in Backend health gets one; that section is for scanning.
+
+Chart fields: `labels` (days, short — `09-Sep`), `series` (one entry per line, `(none)` alongside the populated one proves coverage), `markerIndex` + `markerLabel` for the deploy day so the reader sees the step happen, `subtitle` for the window, and `link` to the Amplitude chart. Keep it to 4–14 points and at most three series — past that it stops being readable, and the number belongs in `proof` instead.
 
 Give each agent: the collect JSON for the window, the paths in `config.json`, and this instruction —
 
