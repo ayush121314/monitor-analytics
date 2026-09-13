@@ -195,6 +195,10 @@
   .finding .fb ul, .finding .fb ol { margin:6px 0; padding-left:20px; }
   .finding .fb table { margin:8px 0; }
   .finding .fix { color:var(--accent); }
+  .act { display:flex; gap:10px; align-items:flex-start; padding:8px 2px; border-top:1px solid var(--line); }
+  .act:first-child { border-top:0; }
+  .act .ad { flex:1; min-width:0; font-size:13.5px; line-height:1.5; }
+  .act .who { color:var(--accent); font-weight:600; }
   .proof { margin-top:9px; padding-top:8px; border-top:1px dashed var(--line); font-family:var(--mono);
     font-size:11px; color:var(--muted); line-height:1.6; }
   .lens { border-left:2px solid var(--line); padding:2px 0 2px 13px; margin:14px 0; }
@@ -470,7 +474,28 @@ function pointsOf (d) {
     seen.add(key)
     health.push({ severity: f.severity, title: f.title, explain: [f.body, f.fix ? `Fix: ${f.fix}` : null].filter(Boolean).join('\n') })
   }
-  return [{ title: 'Naye features', points: feats }, { title: 'Backend ki sehat', points: health }]
+  return [{ title: 'New features', points: feats }, { title: 'Backend health', points: health }]
+}
+
+function actionsOfUi (d) {
+  if (Array.isArray(d.actions)) return d.actions.filter(Boolean)
+  const out = []
+  for (const f of [...(d.health?.newCode?.findings || []), ...(d.health?.overall?.findings || [])]) {
+    if (f.fix) out.push({ what: f.fix, who: '', severity: f.severity })
+  }
+  for (const n of d.needsAttention || []) out.push({ what: n.title, who: '', severity: n.severity, why: n.why })
+  return out
+}
+
+function actionsHtml (actions, index) {
+  const sorted = [...actions].sort((a, b) => (SEVRANK[String(a.severity).toLowerCase()] ?? 9) - (SEVRANK[String(b.severity).toLowerCase()] ?? 9))
+  const rows = sorted.length
+    ? sorted.map(a => {
+      const s = sev(a.severity)
+      return `<div class="act"><span class="bsev ${s.c}">${s.t}</span><div class="ad"><b>${inline(a.what)}</b>${a.who ? `<span class="who"> — ${inline(a.who)}</span>` : ''}${a.why ? `<div class="stamp">${inline(a.why)}</div>` : ''}</div></div>`
+    }).join('')
+    : '<p class="stamp">Nothing to act on.</p>'
+  return `<details class="block" open><summary>${index} · Conclusion${sorted.length ? ` <span class="cnt">${sorted.length}</span>` : ''}</summary><div class="inner">${rows}</div></details>`
 }
 
 function renderReportJson (d) {
@@ -479,10 +504,11 @@ function renderReportJson (d) {
   if (d.window) html.push(`<div class="meta-line">${inline(d.window)}</div>`)
 
   let n = 0
-  for (const [i, sec] of pointsOf(d).entries()) {
+  const secs = pointsOf(d)
+  for (const [i, sec] of secs.entries()) {
     const pts = [...sec.points].sort((a, b) => (SEVRANK[String(a.severity).toLowerCase()] ?? 9) - (SEVRANK[String(b.severity).toLowerCase()] ?? 9))
     html.push(`<details class="block" open><summary>${i + 1} · ${inline(sec.title)}${pts.length ? ` <span class="cnt">${pts.length}</span>` : ''}</summary><div class="inner">`)
-    if (!pts.length) html.push('<p class="stamp">Kuch nahi.</p>')
+    if (!pts.length) html.push('<p class="stamp">Nothing here.</p>')
     for (const pt of pts) {
       const s = sev(pt.severity)
       n++
@@ -493,6 +519,7 @@ function renderReportJson (d) {
     }
     html.push('</div></details>')
   }
+  html.push(actionsHtml(actionsOfUi(d), secs.length + 1))
   return html.join('\n')
 }
 
@@ -702,7 +729,7 @@ function renderReport (body) {
   const renderPoints = (title, items, index) => {
     const sorted = [...items].sort((a, b) => SEVFROM(a.severity).r - SEVFROM(b.severity).r)
     html.push(`<details class="block" open><summary>${index} · ${esc(title)}${sorted.length ? ` <span class="cnt">${sorted.length}</span>` : ''}</summary><div class="inner">`)
-    if (!sorted.length) html.push('<p class="stamp">Kuch nahi.</p>')
+    if (!sorted.length) html.push('<p class="stamp">Nothing here.</p>')
     for (const pt of sorted) {
       const s = SEVFROM(pt.severity)
       idn++
@@ -713,8 +740,34 @@ function renderReport (body) {
     }
     html.push('</div></details>')
   }
-  renderPoints('Naye features', featureItems, 1)
-  renderPoints('Backend ki sehat', healthItems, 2)
+  renderPoints('New features', featureItems, 1)
+  renderPoints('Backend health', healthItems, 2)
+
+  const mdActions = []
+  let inNeeds = false
+  for (const line of body.split('\n')) {
+    if (/^#{2,4}\s/.test(line)) { inNeeds = /needs attention|action|fix(es)?\b|next step/i.test(line); continue }
+    const fix = line.match(/^_?Fix:_?\s*(.+)$/i) || line.match(/^\*\*Fix:\*\*\s*(.+)$/i) || line.match(/^_Fix:_\s*(.+)$/i)
+    if (fix) { mdActions.push({ what: fix[1].replace(/[*_`]/g, '').trim(), severity: '🟠' }); continue }
+    if (!inNeeds) continue
+    const na = line.match(/^(?:\d+\.|[-*])\s*(🔴|🟠|🟡|⏳|🔧|🛠️|✅)?\s*\*\*(.+?)\*\*\s*[—:-]?\s*(.*)$/)
+    if (na) mdActions.push({ what: na[2], why: (na[3] || '').replace(/[*`]/g, '').slice(0, 140), severity: na[1] || '🟠' })
+  }
+  const keyOf = t => t.toLowerCase().replace(/[^a-z ]+/g, ' ').split(/\s+/).filter(w => w.length > 3).slice(0, 5).join(' ')
+  const seenAct = new Set()
+  const uniq = mdActions.filter(a => {
+    const k = keyOf(a.what)
+    if (!k || seenAct.has(k)) return false
+    seenAct.add(k); return true
+  })
+  const sortedAct = uniq.sort((a, b) => SEVFROM(a.severity).r - SEVFROM(b.severity).r).slice(0, 8)
+  html.push(`<details class="block" open><summary>3 · Conclusion${sortedAct.length ? ` <span class="cnt">${sortedAct.length}</span>` : ''}</summary><div class="inner">` +
+    (sortedAct.length
+      ? sortedAct.map(a => {
+        const s = SEVFROM(a.severity)
+        return `<div class="act"><span class="bsev ${s.c}">${s.t}</span><div class="ad"><b>${inline(a.what)}</b>${a.why ? `<div class="stamp">${inline(a.why)}</div>` : ''}</div></div>`
+      }).join('')
+      : '<p class="stamp">Nothing to act on.</p>') + '</div></details>')
 
   html.push(`<details class="raw"><summary>raw markdown</summary><pre>${esc(body)}</pre></details>`)
   return html.join('\n')

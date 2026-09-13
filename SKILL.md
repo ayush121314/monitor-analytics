@@ -148,24 +148,29 @@ Every non-⚪ verdict carries at least one **quoted number or log line** with it
   "window": "12 → 13 Sept 2026 · 1 change",
   "bottomLine": "one line — what a person should take away",
   "sections": [
-    { "title": "Naye features", "points": [
+    { "title": "New features", "points": [
       { "severity": "critical",
         "title": "Share link par product ka apna fbAdId nahi ja raha",
         "explain": "Jab koi share link kholta hai, backend product dhoondhne ki koshish karta hai aur crash kar jata hai. Link phir bhi sahi product kholta hai, paisa ya order kuch nahi bigadta. Par jin products ka apna campaign tag hai (catalog ka 25%), unke PDP par COD aur banner widgets galat dikhte hain.\nFix ek line ka hai — getSharedProduct wapas daal do.",
         "proof": ["Loki controllers.v1.productShare level=error 48h → 44 lines", "git grep getSharedProduct main → still called at productShare.js:19"] }
     ]},
-    { "title": "Backend ki sehat", "points": [ … same shape … ] }
+    { "title": "Backend health", "points": [ … same shape … ] }
+  ],
+  "actions": [
+    { "severity": "critical", "what": "getSharedProduct wapas daalo aur PR merge karo", "who": "backend (ek line ka change)" },
+    { "severity": "important", "what": "Courier webhook secrets Vault me daalo, phir strict flag on karo", "who": "infra / DevOps" }
   ]
 }
 ```
 
 Rules, and there are only five:
 
-1. **Two sections.** The first is what shipped in this window. The second is how the backend is doing overall. Nothing else gets a section.
+1. **Three sections, named in English:** `New features` (what shipped in this window), `Backend health` (how the backend is doing overall), and `Conclusion` — which the renderer builds from `actions`, so you never write it by hand. Nothing else gets a section.
 2. **`title` is one line in plain words** — what happened, not which module. "Share link par fbAdId nahi ja raha", not "productShare controller throws TypeError".
 3. **`explain` is the whole story in easy language** — three or four sentences, Hinglish is fine. What broke, who it affects, how bad, and the fix if there is one. No log lines, no module paths, no query syntax in here.
 4. **`proof` holds the technical evidence** — the queries and the counts, one string each. It renders small and grey under the explanation, so a reader can ignore it and an engineer can re-run it. Never skip it: a point without proof is a guess.
-5. **`severity` on every point:** `critical` 🔴 (paisa, order ya data ruk raha hai) · `important` 🟠 (chal raha hai par galat ya risky) · `watch` 🟡 (dekhte rehna) · `pending` ⏳ (merge hua, prod nahi gaya) · `reverted` 🔁 · `working` ✅ (verify ho gaya, theek hai) · `none` ⚪. The dashboard sorts by it, worst first.
+5. **`actions` is the Conclusion** — one bullet per thing that needs doing, and `who` is mandatory so the reader knows where to send it: `backend`, `infra / DevOps`, `DB owner`, `CMS team`, `app team`. No action, no bullet; an empty list renders as "Nothing to act on." Never restate a finding here — an action is a verb.
+6. **`severity` on every point and every action:** `critical` 🔴 (paisa, order ya data ruk raha hai) · `important` 🟠 (chal raha hai par galat ya risky) · `watch` 🟡 (dekhte rehna) · `pending` ⏳ (merge hua, prod nahi gaya) · `reverted` 🔁 · `working` ✅ (verify ho gaya, theek hai) · `none` ⚪. The dashboard sorts by it, worst first.
 
 Everything you gathered in Steps 2–4 still happens — it just lands as a short point with its numbers in `proof` instead of a long block. If a change needs no attention, one `working` point covers it; do not write four lines about a copy change.
 

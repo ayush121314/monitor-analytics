@@ -17,6 +17,16 @@ export function severity (s) {
 
 export const RANK = { critical: 0, important: 1, pending: 2, watch: 3, reverted: 4, working: 5, none: 6, resolved: 7 }
 
+export function actionsOf (data) {
+  if (Array.isArray(data.actions)) return data.actions.filter(Boolean)
+  const out = []
+  for (const f of [...(data.health?.newCode?.findings || []), ...(data.health?.overall?.findings || [])]) {
+    if (f.fix) out.push({ what: f.fix, who: '', severity: f.severity })
+  }
+  for (const n of data.needsAttention || []) out.push({ what: n.title, who: '', severity: n.severity, why: n.why })
+  return out
+}
+
 export function toPoints (data) {
   if (Array.isArray(data.sections) && data.sections.some(s => Array.isArray(s.points))) {
     return data.sections.map(s => ({ title: s.title || 'Section', points: (s.points || []).filter(Boolean) }))
@@ -40,8 +50,8 @@ export function toPoints (data) {
     health.push({ severity: f.severity, title: f.title, explain: [f.body, f.fix ? `Fix: ${f.fix}` : null].filter(Boolean).join('\n') })
   }
   return [
-    { title: 'Naye features', points: feats },
-    { title: 'Backend ki sehat', points: health }
+    { title: 'New features', points: feats },
+    { title: 'Backend health', points: health }
   ]
 }
 
@@ -58,6 +68,10 @@ export function validate (data) {
         if (!pt.explain) errors.push(`sections[${i}].points[${j}].explain is required — the easy-language explanation`)
         if (!pt.severity || !SEV[String(pt.severity).toLowerCase()]) errors.push(`sections[${i}].points[${j}].severity must be one of ${Object.keys(SEV).join(', ')}`)
       }
+    }
+    for (const [i, a] of (data.actions || []).entries()) {
+      if (!a.what) errors.push(`actions[${i}].what is required — the thing to do, in one line`)
+      if (!a.who) errors.push(`actions[${i}].who is required — who does it (backend / infra / DB owner / CMS), so the reader knows where to send it`)
     }
     return errors
   }
@@ -123,10 +137,11 @@ export function toMarkdown (data) {
     if (data.window) md.push(`**Window:** ${data.window}`)
     md.push(`**Bottom line:** ${data.bottomLine}`)
     md.push('')
-    for (const [i, sec] of toPoints(data).entries()) {
+    const secs = toPoints(data)
+    for (const [i, sec] of secs.entries()) {
       md.push(`### ${i + 1}. ${sec.title}`)
       md.push('')
-      if (!sec.points.length) md.push('Kuch nahi.')
+      if (!sec.points.length) md.push('Nothing here.')
       for (const pt of sec.points) {
         const sv = severity(pt.severity)
         md.push(`**${sv.emoji} ${pt.title}**`)
@@ -139,6 +154,16 @@ export function toMarkdown (data) {
         }
       }
     }
+
+    const actions = actionsOf(data)
+    md.push(`### ${secs.length + 1}. Conclusion`)
+    md.push('')
+    if (!actions.length) md.push('Nothing to act on.')
+    for (const a of actions) {
+      const sv = severity(a.severity)
+      md.push(`- ${sv.emoji} **${a.what}**${a.who ? ` — ${a.who}` : ''}${a.why ? ` (${a.why})` : ''}`)
+    }
+    md.push('')
     return md.join('\n')
   }
 
