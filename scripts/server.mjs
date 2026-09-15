@@ -145,6 +145,7 @@ function saveMeta (job, extra = {}) {
   const meta = {
     id: job.id,
     kind: job.kind,
+    mode: job.mode || 'full',
     status: job.status,
     startedAt: job.startedAt,
     startedAtIst: toIst(job.startedAt),
@@ -174,9 +175,10 @@ function startJob (opts = {}) {
   if (running) return { error: 'a run is already in progress', id: running.id }
 
   jobSeq++
+  const mode = opts.mode === 'features' ? 'features' : 'full'
   const id = `${new Date().toISOString().replace(/[:.]/g, '-')}-audit-${jobSeq}`
   const job = {
-    id, kind: 'audit', status: 'running', startedAt: new Date().toISOString(), phase: 'starting', percent: 2, toolCalls: 0, phaseBase: 2, phaseCap: 10, phaseCalls: 0,
+    id, kind: 'audit', mode, status: 'running', startedAt: new Date().toISOString(), phase: 'starting', percent: 2, toolCalls: 0, phaseBase: 2, phaseCap: 10, phaseCalls: 0,
     lines: [], subscribers: new Set(), exitCode: null, child: null,
     repos: opts.repos || [], usage: null, costUsd: null, pending: null, live: null, outcome: null, runNumber: null
   }
@@ -318,7 +320,7 @@ function startJob (opts = {}) {
       const st = loadState(cfg)
       return st.repos?.[cfg.repos[0].name]?.last_sha || null
     })()
-    const preJobs = [
+    const preJobs = mode === 'features' ? [] : [
       { name: 'crashscan', args: ['crashscan.mjs', '--from', 'now-24h'] },
       { name: 'prodhealth', args: ['prodhealth.mjs'] },
       { name: 'schemadrift', args: ['schemadrift.mjs', '--snapshot', ...(since ? ['--since', since] : [])] },
@@ -327,7 +329,8 @@ function startJob (opts = {}) {
       { name: 'logsweep', args: ['logsweep.mjs', '--from', 'now-24h'] },
       { name: 'learnings', args: ['learnings.mjs'] }
     ]
-    push(`precomputing section 2 inputs in the background: ${preJobs.map(j => j.name).join(', ')}`)
+    if (preJobs.length) push(`precomputing section 2 inputs in the background: ${preJobs.map(j => j.name).join(', ')}`)
+    else push('new features only — skipping the backend health probes (crashscan, prodhealth, schemadrift, invariants, latency, logsweep, learnings)')
     for (const pj of preJobs) {
       const startedAt = new Date().toISOString()
       const child = spawn(process.execPath, [path.join(SKILL_DIR, 'scripts', pj.args[0]), ...pj.args.slice(1)], {
@@ -347,6 +350,15 @@ function startJob (opts = {}) {
       child.on('error', () => {})
     }
 
+    if (mode === 'features' && pending === 0) {
+      push('')
+      push('No new commits since the last check, and this run was asked for new features only.')
+      push('Nothing to analyse — the AI was not started at all, so this run costs no tokens.')
+      push('Run the full audit if you want the overall backend health picture.')
+      job.outcome = 'no-new-commits'
+      return finish(0)
+    }
+
     const healthOnly = pending === 0
     job.healthOnly = healthOnly
     if (healthOnly) {
@@ -358,18 +370,21 @@ function startJob (opts = {}) {
     const flags = (opts.claudeFlags || process.env.FEATURE_AUDIT_CLAUDE_FLAGS || '--permission-mode bypassPermissions').split(' ').filter(Boolean)
     let prompt = '/feature-audit'
     const extras = []
+    if (mode === 'features') extras.push('new features only: produce ONLY the "New features" section for the changes in this window and skip the backend health section completely — do not run or read crashscan, prodhealth, schemadrift, invariants, latency, logsweep or learnings, and do not open the health-cache directory. Record once with record.mjs --data <json> --advance <repo>=<sha>, with a single section titled "New features"')
     if (healthOnly) extras.push('no new commits since the checkpoint — skip the per-feature analysis entirely and produce ONLY the overall backend health section, then record it with record.mjs --health (no checkpoint advance)')
     if ((opts.repos || []).length) extras.push(`only these repos: ${opts.repos.join(', ')}`)
     if (opts.since) extras.push(`start from ${opts.since} instead of the saved checkpoint`)
     if (opts.dry) extras.push('do not advance the checkpoint (dry run)')
     if (opts.note) extras.push(opts.note)
-    extras.push(`section 2 inputs are already being computed in the background into ${path.join(cfg.dataDir, 'health-cache')} — read crashscan.json, prodhealth.json and schemadrift.json from there when you reach the health section instead of running those three again; each has a .meta.json next to it with when it ran`)
+    if (mode === 'full') extras.push(`section 2 inputs are already being computed in the background into ${path.join(cfg.dataDir, 'health-cache')} — read crashscan.json, prodhealth.json and schemadrift.json from there when you reach the health section instead of running those three again; each has a .meta.json next to it with when it ran`)
     extras.push('absolutely do not touch git state — no commit, checkout, branch, stash or push; read-only git only. If you find a fix, describe it in the report instead of applying it')
-    extras.push('keep it tight: publish section 1 within ~10 minutes of starting and finish the whole run in ~20 — if a probe has not settled after two follow-ups, write the honest 🟡 and move on rather than chasing an exact minute')
+    extras.push(mode === 'features'
+      ? 'keep it tight: finish the whole run in ~10 minutes — if a probe has not settled after two follow-ups, write the honest 🟡 and move on rather than chasing an exact minute'
+      : 'keep it tight: publish section 1 within ~10 minutes of starting and finish the whole run in ~20 — if a probe has not settled after two follow-ups, write the honest 🟡 and move on rather than chasing an exact minute')
     if (extras.length) prompt += ' ' + extras.join('; ')
 
     push('')
-    push(healthOnly ? 'handing over to the AI for the health check' : `${pending} change(s) to analyse — handing over to the AI audit`)
+    push(healthOnly ? 'handing over to the AI for the health check' : `${pending} change(s) to analyse — handing over to the AI audit${mode === 'features' ? ' (new features only)' : ''}`)
     push(`claude -p "${prompt}" ${flags.join(' ')}`)
     push('')
 

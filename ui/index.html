@@ -26,6 +26,16 @@
   button.primary { background:var(--accent); border-color:var(--accent); color:#06111f; font-weight:600; padding:8px 20px; }
   button.ghost { background:transparent; }
   button:disabled { opacity:.45; cursor:not-allowed; }
+  .split { position:relative; display:flex; }
+  .split button.primary { border-radius:7px 0 0 7px; }
+  .split button.caret { border-radius:0 7px 7px 0; padding:8px 10px; border-left:1px solid rgba(6,17,31,.25); }
+  .menu { position:absolute; top:calc(100% + 6px); right:0; min-width:290px; z-index:30; display:none;
+    background:var(--panel2); border:1px solid var(--line); border-radius:9px; overflow:hidden; }
+  .menu.on { display:block; }
+  .menu .item { padding:10px 13px; cursor:pointer; font-size:13px; border-left:2px solid transparent; }
+  .menu .item:hover { background:var(--panel); }
+  .menu .item.sel { border-left-color:var(--accent); }
+  .menu .item span { display:block; font-size:11px; color:var(--muted); margin-top:2px; }
   input, select { background:var(--panel2); color:var(--text); border:1px solid var(--line);
     border-radius:6px; padding:6px 9px; font-size:13px; font-family:inherit; }
   main { padding:20px 22px 70px; max-width:1120px; margin:0 auto; }
@@ -261,7 +271,14 @@
     <span class="stamp" id="health"></span>
     <span class="stamp" id="last7"></span>
     <button id="stop" class="ghost" style="display:none">Stop</button>
-    <button id="run" class="primary">Run audit</button>
+    <div class="split">
+      <button id="run" class="primary">Run audit</button>
+      <button id="runCaret" class="primary caret" title="choose what to audit">▾</button>
+      <div class="menu" id="runMenu">
+        <div class="item" data-mode="features">New features only<span>just what shipped since the checkpoint — no backend health checks</span></div>
+        <div class="item" data-mode="full">Full audit<span>new features + overall backend health — heavier, more tokens</span></div>
+      </div>
+    </div>
   </div>
 </header>
 <main>
@@ -290,7 +307,7 @@
         <div class="field"><label>Start from</label><input id="optSince" placeholder="sha (blank = saved checkpoint)"></div>
         <div class="field"><label>Note to AI</label><input id="optNote" placeholder="optional extra instruction"></div>
         <div class="field"><label>Dry run</label><input type="checkbox" id="optDry" style="flex:none"> <span class="stamp">don't advance the checkpoint</span></div>
-        <div class="stamp">These apply to the Run audit button above.</div>
+        <div class="stamp">These apply to the Run audit button above. What the run covers — new features only, or a full audit with the backend health section — is picked from the ▾ next to that button.</div>
       </div>
 
       <div class="box">
@@ -964,7 +981,7 @@ async function loadHistory () {
     const took = r.durationMs ? Math.round(r.durationMs / 1000) + 's' : '—'
     return `<tr>
       <td>${esc(r.startedAtIst || r.startedAt)}</td>
-      <td><span class="pill ${outcome}">${outcome.replace(/-/g, ' ')}</span></td>
+      <td><span class="pill ${outcome}">${outcome.replace(/-/g, ' ')}</span> <span class="stamp">${r.mode === 'features' ? 'new features' : 'full'}</span></td>
       <td class="num">${r.status === 'running' ? esc((r.phase || 'working') + ' · ' + (r.percent || 0) + '%') : (r.pending == null ? '—' : r.pending + (r.live != null ? ` (${r.live} live)` : ''))}</td>
       <td class="num">${r.runNumber ? 'Report ' + r.runNumber : '—'}</td>
       <td class="num" title="in ${fmt(r.tokensIn)} · out ${fmt(r.tokensOut)} · cache read ${fmt(r.tokensCacheRead)} · cache write ${fmt(r.tokensCacheWrite)} · total ${fmt(r.totalTokens)}">${r.tokensOut ? fmt(r.tokensOut) + ' <span class="stamp">out</span>' : (r.totalTokens ? fmt(r.totalTokens) : '—')}</td>
@@ -1008,7 +1025,7 @@ window.jumpTo = id => {
 let stream = null
 function attach (id) {
   $('#console').classList.add('on')
-  $('#run').disabled = true; $('#stop').style.display = ''
+  $('#run').disabled = true; $('#runCaret').disabled = true; $('#stop').style.display = ''
   if (stream) stream.close()
   stream = new EventSource('/api/stream?id=' + encodeURIComponent(id))
   stream.onmessage = e => {
@@ -1021,13 +1038,27 @@ function attach (id) {
   }
   stream.addEventListener('end', () => {
     stream.close(); stream = null
-    $('#run').disabled = false; $('#stop').style.display = 'none'
+    $('#run').disabled = false; $('#runCaret').disabled = false; $('#stop').style.display = 'none'
     loadSummary(); loadRuns(); loadHistory()
   })
 }
 
-$('#run').onclick = async () => {
+const RUN_MODES = {
+  features: { label: 'new features', hint: 'only what shipped since the checkpoint — no backend health checks' },
+  full: { label: 'full', hint: 'new features + overall backend health' }
+}
+let runMode = localStorage.getItem('fa.runMode') === 'full' ? 'full' : 'features'
+function paintRunMode () {
+  $('#run').textContent = 'Run audit · ' + RUN_MODES[runMode].label
+  $('#run').title = RUN_MODES[runMode].hint
+  document.querySelectorAll('#runMenu .item').forEach(i => i.classList.toggle('sel', i.dataset.mode === runMode))
+}
+async function startRun (mode) {
+  runMode = mode
+  localStorage.setItem('fa.runMode', mode)
+  paintRunMode()
   const body = {
+    mode,
     repos: [...$('#optRepos').selectedOptions].map(o => o.value),
     since: $('#optSince').value.trim() || undefined,
     note: $('#optNote').value.trim() || undefined,
@@ -1038,6 +1069,16 @@ $('#run').onclick = async () => {
   if (r.error) { $('#console').classList.add('on'); addLine(r.error); return }
   attach(r.id)
 }
+paintRunMode()
+$('#run').onclick = () => startRun(runMode)
+$('#runCaret').onclick = e => { e.stopPropagation(); $('#runMenu').classList.toggle('on') }
+$('#runMenu').onclick = e => {
+  const item = e.target.closest('.item')
+  if (!item) return
+  $('#runMenu').classList.remove('on')
+  startRun(item.dataset.mode)
+}
+document.addEventListener('click', () => $('#runMenu').classList.remove('on'))
 $('#stop').onclick = () => fetch('/api/stop', { method: 'POST', body: '{}' })
 
 async function loadCommits () {

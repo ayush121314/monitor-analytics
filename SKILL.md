@@ -21,6 +21,15 @@ Walks every change merged since the last checkpoint and decides, **with proof**,
 
 Checkpoint advances **only** through `record.mjs`, and only for repos you actually analyzed in this run.
 
+## What the run covers — new features only, or the full audit
+
+The dashboard's **Run audit** button carries two options and passes the choice into the prompt:
+
+- **New features only** (the default) — produce **only** the `New features` section for what landed in this window and stop there. No `crashscan`, `prodhealth`, `schemadrift`, `invariants`, `latency`, `logsweep` or `learnings`, and do not open `health-cache/` — the dashboard does not compute it in this mode. Record once with `record.mjs --data <json> --advance <repo>=<sha>`, one section titled `New features`. When the window has no new commits the dashboard ends the run before the AI starts, so this mode never writes a health-only report.
+- **Full audit** — everything in this document: the features first, then the backend health section, published in two passes.
+
+The reason is cost: the health half is the expensive half, and prod health does not move between two merges on the same day. Take the full audit when the window deserves it — a release day, a suspicion, the start of a week — and the cheap one the rest of the time.
+
 ## Health-only mode (no new commits)
 
 If `collect.mjs` reports **0 pending changes** for every repo, do **not** skip the run. Skip Steps 2–4 (there is nothing new to verify) and produce **only** the `### Overall backend health` section:
@@ -79,7 +88,7 @@ Per change you get: `sha`, `pr`, `branch`, `kind`, `subject`, `files`, `stat`, `
 
 ## Section 2 is already running while you write section 1
 
-The dashboard fires `crashscan.mjs`, `prodhealth.mjs`, `schemadrift.mjs`, `invariants.mjs`, `latency.mjs`, `logsweep.mjs` and `learnings.mjs` in the background the moment a run starts, so their output is usually sitting there before you finish the features. Read `<dataDir>/health-cache/{crashscan,prodhealth,schemadrift,invariants,latency,logsweep,learnings}.json` rather than running them again; each has a `.meta.json` beside it with the command and when it finished. Re-run a script yourself only if its file is missing, older than the run, or you need a different window.
+**Full audit only** — a new-features-only run skips these entirely and leaves no fresh `health-cache`, so do not read it there. On a full audit the dashboard fires `crashscan.mjs`, `prodhealth.mjs`, `schemadrift.mjs`, `invariants.mjs`, `latency.mjs`, `logsweep.mjs` and `learnings.mjs` in the background the moment a run starts, so their output is usually sitting there before you finish the features. Read `<dataDir>/health-cache/{crashscan,prodhealth,schemadrift,invariants,latency,logsweep,learnings}.json` rather than running them again; each has a `.meta.json` beside it with the command and when it finished. Re-run a script yourself only if its file is missing, older than the run, or you need a different window.
 
 When you do run probes by hand, run independent ones together rather than one after another:
 

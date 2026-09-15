@@ -93,7 +93,7 @@ Each feature is written the same way every time: **Matlab** (one plain line anyo
 
 ## 7. The dashboard, and what it is not
 
-One button. It collects, and if nothing new has landed it says so and runs only the health sweep — no model time spent proving that nothing changed. Otherwise it shells out to the CLI and streams the steps, showing phase and percent, so a long run is legible rather than a spinner.
+One button with two modes. The default asks only what shipped since the checkpoint; the full audit adds the backend health pass, which is the expensive half and rarely changes between two merges on the same day. Either way it collects first: if nothing new has landed, the full mode says so and runs only the health sweep, and the cheap mode stops before the model is started at all — no tokens spent proving that nothing changed. Otherwise it shells out to the CLI and streams the steps, showing phase and percent, so a long run is legible rather than a spinner.
 
 **Nothing starts a run except the person.** No schedule, no deploy trigger. Model time is spent when it is asked for.
 

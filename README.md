@@ -35,8 +35,8 @@ A verdict without a quoted number or log line is not allowed — no evidence mea
 # or: node scripts/server.mjs    # first free port from 8999
 ```
 
-- one button: **Run audit**
-- no new commits → it says so and runs only the backend health check; no per-feature analysis, no checkpoint move
+- one button, two modes: **Run audit · new features** (the default — only what shipped in this window, no health probes, no health section) and **Run audit · full** (features plus the whole backend health pass). The ▾ next to the button picks one, and the choice is remembered
+- no new commits → in full mode it says so and runs only the backend health check, no per-feature analysis and no checkpoint move; in new-features mode the run ends right there without spending a single token
 - every run is stored with its outcome, token usage, cost and duration; the **Last 7 days** tab lists them
 - reports render as collapsible sections — summary, features, health
 - each report has a **discussion**: ask the AI about it, and anything you say "from now on…" is saved to `PREFERENCES.md`, which every future run reads
